@@ -4,7 +4,7 @@ import requests
 from models import StrategyState, Position, Mode
 
 BASE_URL = "https://api.upstox.com/v2"
-ACCESS_TOKEN="eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiIyMzQ3MDEiLCJqdGkiOiI2YTM4MWZjMWJhNjdhYzBlYWM5YjM0NmIiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc4MjA2MzA0MSwiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzgyMDc5MjAwfQ.FsSIZnxIIY_dOlCcZLLByfbkfwIWsnr18A7ARE4N7Jc"
+ACCESS_TOKEN=""
 HEADERS = {
         "Accept": "application/json",
         "Authorization": f"Bearer {ACCESS_TOKEN}"
