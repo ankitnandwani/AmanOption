@@ -1,557 +1,189 @@
-# import upstox_client
-# from upstox_client.rest import ApiException
-#
-# import websocket
-# import json
-# import threading
-# import time as t
-#
-# from datetime import datetime, time
-#
-# # =========================================================
-# # CONFIG
-# # =========================================================
-#
-# ACCESS_TOKEN = ""
-#
-# LOT_SIZE = 1
-# MAX_DAILY_LOSS = 3000
-#
-# COMBINED_SL_PERCENT = 10
-# DIRECTIONAL_SL_PERCENT = 25
-#
-# # =========================================================
-# # GLOBAL STATE
-# # =========================================================
-#
-# live_prices = {}
-#
-# daily_pnl = 0
-#
-# running = True
-#
-# position = None
-# directional_trade = None
-#
-# # =========================================================
-# # API SETUP
-# # =========================================================
-#
-# configuration = upstox_client.Configuration()
-# configuration.access_token = ACCESS_TOKEN
-#
-# api_client = upstox_client.ApiClient(configuration)
-#
-# order_api = upstox_client.OrderApi(api_client)
-#
-# # =========================================================
-# # ORDER FUNCTIONS
-# # =========================================================
-#
-# def place_market_order(
-#         instrument,
-#         qty,
-#         transaction_type
-# ):
-#
-#     try:
-#
-#         body = upstox_client.PlaceOrderRequest(
-#             quantity=qty,
-#             product="D",
-#             validity="DAY",
-#             price=0,
-#             tag="ws_bot",
-#             instrument_token=instrument,
-#             order_type="MARKET",
-#             transaction_type=transaction_type,
-#             disclosed_quantity=0,
-#             trigger_price=0,
-#             is_amo=False
-#         )
-#
-#         response = order_api.place_order(body, "2.0")
-#
-#         print(
-#             f"{transaction_type} SUCCESS:",
-#             instrument
-#         )
-#
-#         return response
-#
-#     except Exception as e:
-#
-#         print("ORDER ERROR:", e)
-#
-#         return None
-#
-#
-# # =========================================================
-# # WEBSOCKET
-# # =========================================================
-#
-# def on_message(ws, message):
-#
-#     global live_prices
-#
-#     try:
-#
-#         data = json.loads(message)
-#
-#         if "feeds" not in data:
-#             return
-#
-#         feeds = data["feeds"]
-#
-#         for instrument, values in feeds.items():
-#
-#             ltp = values["ltpc"]["ltp"]
-#
-#             live_prices[instrument] = ltp
-#
-#     except Exception as e:
-#
-#         print("WS MESSAGE ERROR:", e)
-#
-#
-# def on_open(ws):
-#
-#     print("WebSocket Connected")
-#
-#     subscribe_data = {
-#         "guid": "someguid",
-#         "method": "sub",
-#         "data": {
-#             "mode": "ltpc",
-#             "instrumentKeys": [
-#                 position["ce"]["instrument"],
-#                 position["pe"]["instrument"]
-#             ]
-#         }
-#     }
-#
-#     ws.send(json.dumps(subscribe_data))
-#
-#
-# def start_websocket():
-#
-#     ws_url = (
-#         "wss://api.upstox.com/v3/feed/market-data-feed"
-#     )
-#
-#     headers = [
-#         f"Authorization: Bearer {ACCESS_TOKEN}"
-#     ]
-#
-#     ws = websocket.WebSocketApp(
-#         ws_url,
-#         header=headers,
-#         on_open=on_open,
-#         on_message=on_message
-#     )
-#
-#     ws.run_forever()
-#
-#
-# # =========================================================
-# # OPTION SELECTION
-# # =========================================================
-#
-# def find_75_premium_options():
-#
-#     """
-#     Replace with actual option chain lookup.
-#     """
-#
-#     return {
-#         "ce": {
-#             "instrument": "NSE_FO|CE_TOKEN",
-#             "price": 75
-#         },
-#         "pe": {
-#             "instrument": "NSE_FO|PE_TOKEN",
-#             "price": 75
-#         }
-#     }
-#
-#
-# # =========================================================
-# # ENTRY
-# # =========================================================
-#
-# def enter_initial_strangle():
-#
-#     global position
-#
-#     options = find_75_premium_options()
-#
-#     ce = options["ce"]
-#     pe = options["pe"]
-#
-#     place_market_order(
-#         ce["instrument"],
-#         LOT_SIZE,
-#         "SELL"
-#     )
-#
-#     place_market_order(
-#         pe["instrument"],
-#         LOT_SIZE,
-#         "SELL"
-#     )
-#
-#     entry_premium = (
-#         ce["price"] + pe["price"]
-#     )
-#
-#     position = {
-#         "ce": ce,
-#         "pe": pe,
-#         "entry_premium": entry_premium,
-#         "combined_sl": (
-#             entry_premium
-#             * (1 + COMBINED_SL_PERCENT / 100)
-#         )
-#     }
-#
-#     print("INITIAL STRANGLE ENTERED")
-#
-#     return position
-#
-#
-# # =========================================================
-# # EXIT
-# # =========================================================
-#
-# def exit_all_positions():
-#
-#     global running
-#
-#     try:
-#
-#         if position:
-#
-#             place_market_order(
-#                 position["ce"]["instrument"],
-#                 LOT_SIZE,
-#                 "BUY"
-#             )
-#
-#             place_market_order(
-#                 position["pe"]["instrument"],
-#                 LOT_SIZE,
-#                 "BUY"
-#             )
-#
-#         if directional_trade:
-#
-#             place_market_order(
-#                 directional_trade["instrument"],
-#                 LOT_SIZE,
-#                 "BUY"
-#             )
-#
-#     except Exception as e:
-#
-#         print("EXIT ERROR:", e)
-#
-#     running = False
-#
-#     print("ALL POSITIONS CLOSED")
-#
-#
-# # =========================================================
-# # PNL
-# # =========================================================
-#
-# def calculate_current_pnl():
-#
-#     global daily_pnl
-#
-#     if not position:
-#         return 0
-#
-#     ce_live = live_prices.get(
-#         position["ce"]["instrument"],
-#         position["ce"]["price"]
-#     )
-#
-#     pe_live = live_prices.get(
-#         position["pe"]["instrument"],
-#         position["pe"]["price"]
-#     )
-#
-#     ce_pnl = (
-#         position["ce"]["price"] - ce_live
-#     ) * LOT_SIZE
-#
-#     pe_pnl = (
-#         position["pe"]["price"] - pe_live
-#     ) * LOT_SIZE
-#
-#     total = ce_pnl + pe_pnl
-#
-#     daily_pnl = total
-#
-#     return total
-#
-#
-# # =========================================================
-# # DIRECTIONAL ENTRY
-# # =========================================================
-#
-# def enter_directional_trade():
-#
-#     global directional_trade
-#
-#     ce_live = live_prices[
-#         position["ce"]["instrument"]
-#     ]
-#
-#     pe_live = live_prices[
-#         position["pe"]["instrument"]
-#     ]
-#
-#     # profitable leg
-#     if ce_live < pe_live:
-#
-#         selected = position["ce"]
-#
-#     else:
-#
-#         selected = position["pe"]
-#
-#     place_market_order(
-#         selected["instrument"],
-#         LOT_SIZE,
-#         "SELL"
-#     )
-#
-#     entry = live_prices[selected["instrument"]]
-#
-#     directional_trade = {
-#         "instrument": selected["instrument"],
-#         "entry_price": entry,
-#         "lowest_price": entry
-#     }
-#
-#     print("DIRECTIONAL TRADE ENTERED")
-#
-#
-# # =========================================================
-# # MAIN MONITOR
-# # =========================================================
-#
-# def monitor_strategy():
-#
-#     global running
-#
-#     while running:
-#
-#         now = datetime.now().time()
-#
-#         # EOD EXIT
-#         if now >= time(15, 20):
-#
-#             print("EOD EXIT")
-#
-#             exit_all_positions()
-#
-#             break
-#
-#         pnl = calculate_current_pnl()
-#
-#         print("LIVE PNL:", pnl)
-#
-#         # DAILY LOSS LIMIT
-#         if pnl <= -MAX_DAILY_LOSS:
-#
-#             print("MAX DAILY LOSS HIT")
-#
-#             exit_all_positions()
-#
-#             break
-#
-#         # COMBINED PREMIUM
-#         ce_live = live_prices.get(
-#             position["ce"]["instrument"]
-#         )
-#
-#         pe_live = live_prices.get(
-#             position["pe"]["instrument"]
-#         )
-#
-#         if ce_live and pe_live:
-#
-#             combined = ce_live + pe_live
-#
-#             print("Combined Premium:", combined)
-#
-#             # STRANGLE SL HIT
-#             if combined >= position["combined_sl"]:
-#
-#                 print("COMBINED SL HIT")
-#
-#                 exit_all_positions()
-#
-#                 enter_directional_trade()
-#
-#         # TRAILING
-#         if directional_trade:
-#
-#             current = live_prices.get(
-#                 directional_trade["instrument"]
-#             )
-#
-#             if current:
-#
-#                 if current < directional_trade["lowest_price"]:
-#
-#                     directional_trade["lowest_price"] = current
-#
-#                 trailing_sl = (
-#                     directional_trade["lowest_price"]
-#                     * 1.10
-#                 )
-#
-#                 if current >= trailing_sl:
-#
-#                     print("TRAILING SL HIT")
-#
-#                     exit_all_positions()
-#
-#                     break
-#
-#         t.sleep(1)
-#
-#
-# # =========================================================
-# # MAIN
-# # =========================================================
-#
-# def run():
-#
-#     # while datetime.now().time() < time(9, 16):
-#     #
-#     #     print("Waiting for 9:16...")
-#     #
-#     #     t.sleep(5)
-#
-#     enter_initial_strangle()
-#
-#     # start websocket
-#     ws_thread = threading.Thread(
-#         target=start_websocket
-#     )
-#
-#     ws_thread.daemon = True
-#
-#     ws_thread.start()
-#
-#     # wait for initial ticks
-#     t.sleep(3)
-#
-#     monitor_strategy()
+from datetime import datetime
 
-
-if __name__ == "__main__":
-
-    run()
-
-import upstox_client
-import time
 import requests
-from upstox_client.rest import ApiException
+from models import StrategyState, Position, Mode
 
-def on_message(message):
-    print("MESSAGE RECEIVED:")
-    print(message)
+BASE_URL = "https://api.upstox.com/v2"
+ACCESS_TOKEN="eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiIyMzQ3MDEiLCJqdGkiOiI2YTM4MWZjMWJhNjdhYzBlYWM5YjM0NmIiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc4MjA2MzA0MSwiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzgyMDc5MjAwfQ.FsSIZnxIIY_dOlCcZLLByfbkfwIWsnr18A7ARE4N7Jc"
+HEADERS = {
+        "Accept": "application/json",
+        "Authorization": f"Bearer {ACCESS_TOKEN}"
+    }
 
-def auth():
-    headers = {
-        "Authorization": f"Bearer "
+def get_option_contracts(instrument_key):
+    url = f"{BASE_URL}/option/contract"
+    params = {
+        "instrument_key": instrument_key
     }
 
     response = requests.get(
-        "https://api.upstox.com/v2/user/profile",
-        headers=headers
+        url=url,
+        params=params,
+        headers=HEADERS
     )
 
-    print(response.status_code)
-    print(response.text)
+    response.raise_for_status()
+    return response.json()
 
+def enrich_with_ltp(contracts_by_strike, option_chain_data):
 
-def place_order(token):
-    print("inside place order")
-    configuration = upstox_client.Configuration(sandbox=True)
-    configuration.access_token = token
-    api_instance = upstox_client.OrderApiV3(upstox_client.ApiClient(configuration))
-    body = upstox_client.PlaceOrderV3Request(quantity=4000, product="D", validity="DAY",
-                                             price=0, tag="string", instrument_token="NSE_EQ|INE669E01016",
-                                             order_type="MARKET", transaction_type="BUY", disclosed_quantity=0,
-                                             trigger_price=0.0, is_amo=False, slice=True)
+    for item in option_chain_data["data"]:
 
-    try:
-        api_response = api_instance.place_order(body)
-        print(api_response)
-    except ApiException as e:
-        print("Exception when calling OrderApiV3->place_order: %s\n" % e)
+        strike = item["strike_price"]
+
+        if strike not in contracts_by_strike:
+            continue
+
+        # CE
+        call = item.get("call_options")
+        if call:
+
+            ce_ltp = call.get("market_data", {}).get("ltp")
+
+            if (
+                    "CE" in contracts_by_strike[strike]
+                    and ce_ltp is not None
+            ):
+                contracts_by_strike[strike]["CE"]["ltp"] = ce_ltp
+
+        # PE
+        put = item.get("put_options")
+        if put:
+
+            pe_ltp = put.get("market_data", {}).get("ltp")
+
+            if (
+                    "PE" in contracts_by_strike[strike]
+                    and pe_ltp is not None
+            ):
+                contracts_by_strike[strike]["PE"]["ltp"] = pe_ltp
+
+    return contracts_by_strike
+
+def get_option_chain(instrument_key, expiry_date):
+
+    url = f"{BASE_URL}/option/chain"
+
+    params = {
+        "instrument_key": instrument_key,
+        "expiry_date": expiry_date
+    }
+
+    res = requests.get(url, headers=HEADERS, params=params)
+    res.raise_for_status()
+
+    return res.json()
+
+def find_nearest_option(contracts_by_strike, option_type, target=35):
+    if option_type not in ["CE", "PE"]:
+        raise ValueError("option_type must be CE or PE")
+
+    best = None
+    best_diff = float("inf")
+    best_strike = None
+
+    for strike, data in contracts_by_strike.items():
+        option = data.get(option_type)
+        if not option:
+            continue
+
+        ltp = option.get("ltp")
+
+        # 🔥 IMPORTANT: skip invalid LTP
+        if ltp is None or ltp <= 0:
+            continue
+
+        diff = abs(ltp - target)
+
+        if diff < best_diff:
+            best_diff = diff
+            best = option
+            best_strike = strike
+
+        if best:
+            best["strike_price"] = best_strike
+
+    return best
+
+def create_position(contract, option_type, lot_size, sl_pct):
+    entry_price = contract["ltp"]
+    return Position(
+        instrument_key=contract["instrument_key"],
+        option_type=option_type,
+        strike_price=contract["strike_price"],
+        entry_price=entry_price,
+        lot_size=lot_size,
+        sl_pct=sl_pct,
+        sl_price=entry_price * (1 + sl_pct),
+        entry_time=datetime.now()
+    )
 
 def main():
+    contracts = get_option_contracts("NSE_INDEX|Nifty 50")
 
-    print("calling auth")
-    auth()
-    sandbox_token = ""
-    place_order(sandbox_token)
-
-    configuration = upstox_client.Configuration()
-
-    access_token = ""
-
-    configuration.access_token = access_token
-
-    api_client = upstox_client.ApiClient(configuration)
-
-    streamer = upstox_client.MarketDataStreamerV3(
-        api_client,
-        ["NSE_INDEX|Nifty 50"],
-        "full"
+    expiries = sorted(
+        set(
+            c["expiry"]
+            for c in contracts["data"]
+        )
     )
 
-    def on_open():
+    nearest_expiry = expiries[0]
 
-        print("Websocket Opened")
+    current_expiry_contracts = [
+        c for c in contracts["data"]
+        if c["expiry"] == nearest_expiry
+    ]
 
-        streamer.subscribe(
-            ["NSE_INDEX|Nifty 50"],
-            "full"
+    current_expiry_contracts.sort(
+        key=lambda x: (
+            x["strike_price"],
+            x["instrument_type"]
         )
+    )
 
-    def on_error(error):
+    contracts_by_strike = {}
 
-        print("ERROR:")
-        print(error)
+    for c in current_expiry_contracts:
+        strike = c["strike_price"]
+        option_type = c["instrument_type"]
 
-    def on_close(message):
+        contracts_by_strike.setdefault(strike, {})
+        contracts_by_strike[strike][option_type] = c
 
-        print("CLOSED:")
-        print(message)
+    option_chain = get_option_chain("NSE_INDEX|Nifty 50", nearest_expiry)
+    contracts_by_strike = enrich_with_ltp(
+        contracts_by_strike,
+        option_chain
+    )
 
-    streamer.on("open", on_open)
-    streamer.on("message", on_message)
-    streamer.on("error", on_error)
-    streamer.on("close", on_close)
+    ce_contract = find_nearest_option(contracts_by_strike, "CE", 35)
+    pe_contract = find_nearest_option(contracts_by_strike, "PE", 35)
 
-    print("Connecting...")
+    ce_position = create_position(ce_contract,"CE", lot_size=75, sl_pct=0.20)
+    pe_position = create_position(pe_contract,"PE", lot_size=75, sl_pct=0.20)
 
-    streamer.connect()
+    state = StrategyState(
+        mode=Mode.HEDGED,
+        ce_position=ce_position,
+        pe_position=pe_position,
+        active_side="BOTH"
+    )
 
-    print("Connected")
-
-    # KEEP SCRIPT RUNNING
-    while True:
-        time.sleep(1)
-
+    print()
+    print("MODE :", state.mode.value)
+    print()
+    print("CE POSITION")
+    print("Instrument :", state.ce_position.instrument_key)
+    print("Strike :", state.ce_position.strike_price)
+    print("Entry :", state.ce_position.entry_price)
+    print("SL :", state.ce_position.sl_price)
+    print()
+    print("PE POSITION")
+    print("Instrument :", state.pe_position.instrument_key)
+    print("Strike :", state.pe_position.strike_price)
+    print("Entry :", state.pe_position.entry_price)
+    print("SL :", state.pe_position.sl_price)
 
 if __name__ == "__main__":
     main()
