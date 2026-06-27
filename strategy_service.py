@@ -1,10 +1,9 @@
-import time
 from datetime import datetime
-from datetime import time as dt_time
-
 import requests
-from models import StrategyState, Position, Mode, MarketData
-from utils import get_ltp, calculate_position_pnl
+from sympy import false, true
+
+from models import Position, Mode
+from utils import get_ltp, calculate_position_pnl, build_market_data
 from config import ACCESS_TOKEN
 from config import BASE_URL
 
@@ -144,12 +143,15 @@ def check_hedged_sl(state, market_data):
         new_pe_contract = find_nearest_option(market_data, "PE", 35)
         new_pe_position = create_position(new_pe_contract, num_lots=1, sl_pct=0.25)
         state.enter_directional(new_pe_position)
+        return True
     elif pe_sl_hit:
         print("PE SL HIT")
         square_off(state, market_data)
         new_ce_contract = find_nearest_option(market_data, "CE", 35)
         new_ce_position = create_position(new_ce_contract, num_lots=1, sl_pct=0.25)
         state.enter_directional(new_ce_position)
+        return True
+    return False
 
 
 def check_directional_sl(state, market_data):
@@ -171,6 +173,8 @@ def check_directional_sl(state, market_data):
         pe_position = create_position(pe_contract, num_lots=1, sl_pct=0.20)
 
         state.enter_hedged(ce_position, pe_position)
+        return True
+    return False
 
 
 def calculate_total_pnl(state):
@@ -261,84 +265,43 @@ def initialize_state(state, market_data):
     pe_position = create_position(pe_contract, num_lots=1, sl_pct=0.20)
     state.enter_hedged(ce_position, pe_position)
 
+def bootstrap_strategy(strategy, market_data, underlying_key, expiry):
+    option_chain = get_option_chain(underlying_key, expiry)
+    refresh_option_chain_prices(market_data, option_chain)
 
-def run_day(state, market_data, instrument_key, expiry):
-    initialized = False
+    ce_contract = find_nearest_option(market_data, "CE", 35)
+    pe_contract = find_nearest_option(market_data,"PE",35)
 
-    while True:
-        option_chain = get_option_chain(instrument_key, expiry)
-        refresh_option_chain_prices(market_data, option_chain)
+    strategy.enter_initial_position(ce_contract, pe_contract)
 
-        # STEP 1: INITIALIZE ONLY ONCE
-        if not initialized:
-            initialize_state(state, market_data)
-            initialized = True
-            print("INITIALIZED HEDGED POSITIONS")
-
-        # STEP 2: RUN STRATEGY
-        should_continue = run_strategy(state, market_data)
-        print_state(state)
-
-        # STEP 3: EXIT CONDITIONS
-        if not should_continue:
-            print("STOPPING STRATEGY")
-            break
-
-        current_time = datetime.now().time()
-        if current_time >= dt_time(15, 15):
-            print("DAY END EXIT")
-            square_off(state, market_data)
-            break
-
-        time.sleep(1)
-
-
-def main():
-    contracts = get_option_contracts("NSE_INDEX|Nifty 50")
-
-    expiries = sorted(
-        set(
-            c["expiry"]
-            for c in contracts["data"]
-        )
-    )
-
-    nearest_expiry = expiries[0]
-
-    current_expiry_contracts = [
-        c for c in contracts["data"]
-        if c["expiry"] == nearest_expiry
+    return [
+        ce_contract["instrument_key"],
+        pe_contract["instrument_key"]
     ]
 
-    current_expiry_contracts.sort(
-        key=lambda x: (
-            x["strike_price"],
-            x["instrument_type"]
-        )
-    )
 
-    market_data = MarketData()
+class Strategy:
 
-    for c in current_expiry_contracts:
-        strike = c["strike_price"]
-        option_type = c["instrument_type"]
+    def __init__(self, state, market_data):
+        self.state = state
+        self.market_data = market_data
 
-        market_data.contracts_by_strike.setdefault(strike, {})
-        market_data.contracts_by_strike[strike][option_type] = c
-        market_data.contracts_by_instrument_key[
-            c["instrument_key"]
-        ] = c
+    def enter_initial_position(self, ce_contract, pe_contract):
+        ce_position = create_position(ce_contract, num_lots=self.state.lot_size, sl_pct=0.20)
+        pe_position = create_position(pe_contract, num_lots=self.state.lot_size, sl_pct=0.20)
+        self.state.enter_hedged(ce_position, pe_position)
+        print("Initial positions created")
+        print_state(self.state, self.market_data)
 
-    state = StrategyState(
-        mode=Mode.HEDGED,
-        ce_position=None,
-        pe_position=None,
-        active_side="NONE",
-        realized_pnl=0
-    )
-
-    run_day(state, market_data, "NSE_INDEX|Nifty 50", nearest_expiry)
-
-
-if __name__ == "__main__":
-    main()
+    def on_tick(self, instrument_key, ltp):
+        if instrument_key not in self.market_data.contracts_by_instrument_key:
+            return
+        self.market_data.update_ltp(instrument_key, ltp)
+        update_live_pnl(self.state, self.market_data)
+        state_changed = False
+        if self.state.mode == Mode.HEDGED:
+            state_changed = check_hedged_sl(self.state, self.market_data)
+        else:
+            state_changed = check_directional_sl(self.state, self.market_data)
+        if state_changed:
+            print_state(self.state, self.market_data)
