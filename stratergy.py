@@ -4,9 +4,9 @@ from datetime import datetime
 import requests
 from models import StrategyState, Position, Mode, MarketData
 from utils import get_ltp, calculate_position_pnl
+from config import ACCESS_TOKEN
+from config import BASE_URL
 
-BASE_URL = "https://api.upstox.com/v2"
-ACCESS_TOKEN=""
 HEADERS = {
         "Accept": "application/json",
         "Authorization": f"Bearer {ACCESS_TOKEN}"
@@ -27,7 +27,7 @@ def get_option_contracts(instrument_key):
     response.raise_for_status()
     return response.json()
 
-def enrich_with_ltp(market_data, option_chain_data):
+def refresh_option_chain_prices(market_data, option_chain_data):
     for item in option_chain_data["data"]:
         strike = item["strike_price"]
 
@@ -188,7 +188,7 @@ def update_live_pnl(state, market_data):
         pe_ltp = get_ltp(state.pe_position, market_data)
         calculate_position_pnl(state.pe_position, pe_ltp)
 
-def print_state(state):
+def print_state(state, market_data):
     print()
     print("=" * 50)
     print("MODE :", state.mode.value)
@@ -248,7 +248,7 @@ def run_day(state, market_data, instrument_key, expiry):
 
     while True:
         option_chain = get_option_chain(instrument_key, expiry)
-        enrich_with_ltp(market_data, option_chain)
+        refresh_option_chain_prices(market_data, option_chain)
 
         # STEP 1: INITIALIZE ONLY ONCE
         if not initialized:

@@ -2,6 +2,9 @@ from dataclasses import dataclass, field
 from enum import Enum
 from datetime import datetime
 
+from stratergy import update_live_pnl, check_hedged_sl, print_state, check_directional_sl
+
+
 class Mode(Enum):
     HEDGED = "HEDGED"
     DIRECTIONAL = "DIRECTIONAL"
@@ -62,3 +65,32 @@ class TradingEngineState:
 class MarketData:
     contracts_by_strike: dict = field(default_factory=dict)
     contracts_by_instrument_key: dict = field(default_factory=dict)
+
+    def update_ltp(self, instrument_key, ltp):
+        contract = self.contracts_by_instrument_key.get(instrument_key)
+
+        if contract:
+            contract["ltp"] = ltp
+
+
+
+class Strategy:
+
+    def __init__(
+            self,
+            state,
+            market_data):
+
+        self.state = state
+        self.market_data = market_data
+
+    def on_tick(self, instrument_key, ltp):
+
+        self.market_data.update_ltp(instrument_key, ltp)
+        update_live_pnl(self.state, self.market_data)
+
+        if self.state.mode == Mode.HEDGED:
+            check_hedged_sl(self.state, self.market_data)
+        else:
+            check_directional_sl(self.state, self.market_data)
+        print_state(self.state, self.market_data)
