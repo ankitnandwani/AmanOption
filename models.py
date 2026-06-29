@@ -31,7 +31,6 @@ class StrategyState:
     pe_position: Position = None
     active_side: str = "BOTH"
     realized_pnl: float = 0.0
-    lot_size: int = 1
 
     def enter_hedged(self, ce_position, pe_position):
         self.mode = Mode.HEDGED
@@ -68,3 +67,12 @@ class MarketData:
 
         if contract:
             contract["ltp"] = ltp
+
+@dataclass
+class StrategyConfig:
+    access_token: str
+    underlying_key: str
+    lots: int
+    target_premium: float
+    sl_pct: float
+    max_loss: float

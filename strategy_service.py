@@ -1,68 +1,12 @@
 from datetime import datetime
-import requests
-from sympy import false, true
-
 from models import Position, Mode
+from upstox_service import get_option_chain, refresh_option_chain_prices
 from utils import get_ltp, calculate_position_pnl, build_market_data
-from config import ACCESS_TOKEN
-from config import BASE_URL
-
-HEADERS = {
-        "Accept": "application/json",
-        "Authorization": f"Bearer {ACCESS_TOKEN}"
-    }
 
 
-def get_option_contracts(instrument_key):
-    url = f"{BASE_URL}/option/contract"
-    params = {
-        "instrument_key": instrument_key
-    }
-
-    response = requests.get(
-        url=url,
-        params=params,
-        headers=HEADERS
-    )
-
-    response.raise_for_status()
-    return response.json()
-
-def refresh_option_chain_prices(market_data, option_chain_data):
-    for item in option_chain_data["data"]:
-        strike = item["strike_price"]
-
-        if strike not in market_data.contracts_by_strike:
-            continue
-
-        # CE
-        call = item.get("call_options")
-        if call:
-            ce_ltp = call.get("market_data", {}).get("ltp")
-            market_data.contracts_by_strike[strike]["CE"]["ltp"] = ce_ltp
-
-        # PE
-        put = item.get("put_options")
-        if put:
-            pe_ltp = put.get("market_data", {}).get("ltp")
-            market_data.contracts_by_strike[strike]["PE"]["ltp"] = pe_ltp
-
-
-def get_option_chain(instrument_key, expiry_date):
-    url = f"{BASE_URL}/option/chain"
-
-    params = {
-        "instrument_key": instrument_key,
-        "expiry_date": expiry_date
-    }
-
-    res = requests.get(url, headers=HEADERS, params=params)
-    res.raise_for_status()
-
-    return res.json()
-
-
-def find_nearest_option(market_data, option_type, target=35):
+def find_nearest_option(strategy, option_type):
+    market_data = strategy.market_data
+    target = strategy.config.target_premium
     if option_type not in ["CE", "PE"]:
         raise ValueError("option_type must be CE or PE")
 
@@ -94,22 +38,25 @@ def find_nearest_option(market_data, option_type, target=35):
     return best
 
 
-def create_position(contract, num_lots, sl_pct):
+def create_position(strategy, contract):
     entry_price = contract["ltp"]
+    sl_pct = strategy.config.sl_pct
     return Position(
         instrument_key=contract["instrument_key"],
         option_type=contract["instrument_type"],
         strike_price=contract["strike_price"],
         entry_price=entry_price,
         lot_size=contract["lot_size"],
-        num_lots=num_lots,
+        num_lots=strategy.config.lots,
         sl_pct=sl_pct,
         sl_price=entry_price * (1 + sl_pct),
         entry_time=datetime.now()
     )
 
 
-def square_off(state, market_data):
+def square_off(strategy):
+    state = strategy.state
+    market_data = strategy.market_data
     if state.ce_position:
         ce_ltp = get_ltp(state.ce_position, market_data)
         state.realized_pnl += calculate_position_pnl(state.ce_position, ce_ltp)
@@ -130,7 +77,9 @@ def is_sl_hit(position, current_ltp):
     return current_ltp >= position.sl_price
 
 
-def check_hedged_sl(state, market_data):
+def check_hedged_sl(strategy):
+    state = strategy.state
+    market_data = strategy.market_data
     ce_ltp = get_ltp(state.ce_position, market_data)
     pe_ltp = get_ltp(state.pe_position, market_data)
 
@@ -138,23 +87,25 @@ def check_hedged_sl(state, market_data):
     pe_sl_hit = is_sl_hit(state.pe_position, pe_ltp)
 
     if ce_sl_hit:
-        print("CE SL HIT")
-        square_off(state, market_data)
-        new_pe_contract = find_nearest_option(market_data, "PE", 35)
-        new_pe_position = create_position(new_pe_contract, num_lots=1, sl_pct=0.25)
+        strategy.events.info("CE SL HIT")
+        square_off(strategy)
+        new_pe_contract = find_nearest_option(strategy, "PE")
+        new_pe_position = create_position(strategy, new_pe_contract)
         state.enter_directional(new_pe_position)
         return True
     elif pe_sl_hit:
-        print("PE SL HIT")
-        square_off(state, market_data)
-        new_ce_contract = find_nearest_option(market_data, "CE", 35)
-        new_ce_position = create_position(new_ce_contract, num_lots=1, sl_pct=0.25)
+        strategy.events.info("PE SL HIT")
+        square_off(strategy)
+        new_ce_contract = find_nearest_option(strategy, "CE")
+        new_ce_position = create_position(strategy, new_ce_contract)
         state.enter_directional(new_ce_position)
         return True
     return False
 
 
-def check_directional_sl(state, market_data):
+def check_directional_sl(strategy):
+    state = strategy.state
+    market_data = strategy.market_data
     if state.active_side == "CE":
         pos = state.ce_position
     else:
@@ -163,21 +114,22 @@ def check_directional_sl(state, market_data):
     current_ltp = get_ltp(pos, market_data)
 
     if is_sl_hit(pos, current_ltp):
-        print("Directional SL HIT")
-        square_off(state, market_data)
+        strategy.events.info("Directional SL HIT")
+        square_off(strategy)
 
-        ce_contract = find_nearest_option(market_data, "CE", 35)
-        pe_contract = find_nearest_option(market_data, "PE", 35)
+        ce_contract = find_nearest_option(strategy, "CE")
+        pe_contract = find_nearest_option(strategy, "PE")
 
-        ce_position = create_position(ce_contract, num_lots=1, sl_pct=0.20)
-        pe_position = create_position(pe_contract, num_lots=1, sl_pct=0.20)
+        ce_position = create_position(strategy, ce_contract)
+        pe_position = create_position(strategy, pe_contract)
 
         state.enter_hedged(ce_position, pe_position)
         return True
     return False
 
 
-def calculate_total_pnl(state):
+def calculate_total_pnl(strategy):
+    state = strategy.state
     total = state.realized_pnl
 
     if state.ce_position:
@@ -189,12 +141,14 @@ def calculate_total_pnl(state):
     return total
 
 
-def is_max_loss_hit(state, max_loss=3000):
-    total_pnl = calculate_total_pnl(state)
-    return total_pnl <= -max_loss
+def is_max_loss_hit(strategy):
+    total_pnl = calculate_total_pnl(strategy.state)
+    return total_pnl <= -strategy.config.max_loss
 
 
-def update_live_pnl(state, market_data):
+def update_live_pnl(strategy):
+    state = strategy.state
+    market_data = strategy.market_data
     if state.ce_position:
         ce_ltp = get_ltp(state.ce_position, market_data)
         calculate_position_pnl(state.ce_position, ce_ltp)
@@ -204,73 +158,30 @@ def update_live_pnl(state, market_data):
         calculate_position_pnl(state.pe_position, pe_ltp)
 
 
-def print_state(state, market_data):
-    print()
-    print("=" * 50)
-    print("MODE :", state.mode.value)
-    print("ACTIVE :", state.active_side)
-    print("REALIZED :", round(state.realized_pnl, 2))
+def run_strategy(strategy):
+    state = strategy.state
+    update_live_pnl(strategy)
 
-    if state.ce_position:
-        print()
-        print("CE")
-        print(state.ce_position.instrument_key)
-        print("Strike :", state.ce_position.strike_price)
-        print("Entry :", state.ce_position.entry_price)
-        print("SL :", state.ce_position.sl_price)
-        print("ltp :", get_ltp(state.ce_position, market_data))
-        print("PnL :", round(state.ce_position.pnl, 2))
-
-    if state.pe_position:
-        print()
-        print("PE")
-        print(state.pe_position.instrument_key)
-        print("Strike :", state.pe_position.strike_price)
-        print("Entry :", state.pe_position.entry_price)
-        print("SL :", state.pe_position.sl_price)
-        print("ltp :", get_ltp(state.pe_position, market_data))
-        print("PnL :", round(state.pe_position.pnl, 2))
-
-    print()
-    print("TOTAL :", round(calculate_total_pnl(state), 2))
-    print("=" * 50)
-
-
-def run_strategy(state, market_data):
-    update_live_pnl(state, market_data)
-
-    if is_max_loss_hit(state, 3000):
-        print()
-        print("MAX LOSS HIT")
-        square_off(state, market_data)
+    if is_max_loss_hit(strategy):
+        strategy.events.info()
+        strategy.events.info("MAX LOSS HIT")
+        square_off(strategy)
         return False
 
     if state.mode == Mode.HEDGED:
-        check_hedged_sl(state, market_data)
-
+        check_hedged_sl(strategy)
     elif state.mode == Mode.DIRECTIONAL:
-        check_directional_sl(state, market_data)
+        check_directional_sl(strategy)
 
     return True
 
-
-def initialize_state(state, market_data):
-    ce_contract = find_nearest_option(market_data, "CE", 35)
-    pe_contract = find_nearest_option(market_data, "PE", 35)
-
-    if ce_contract is None or pe_contract is None:
-        raise Exception("No valid CE/PE found at startup")
-
-    ce_position = create_position(ce_contract, num_lots=1, sl_pct=0.20)
-    pe_position = create_position(pe_contract, num_lots=1, sl_pct=0.20)
-    state.enter_hedged(ce_position, pe_position)
-
-def bootstrap_strategy(strategy, market_data, underlying_key, expiry):
-    option_chain = get_option_chain(underlying_key, expiry)
+def bootstrap_strategy(strategy, underlying_key, expiry):
+    market_data = strategy.market_data
+    option_chain = get_option_chain(strategy, underlying_key, expiry)
     refresh_option_chain_prices(market_data, option_chain)
 
-    ce_contract = find_nearest_option(market_data, "CE", 35)
-    pe_contract = find_nearest_option(market_data,"PE",35)
+    ce_contract = find_nearest_option(strategy, "CE")
+    pe_contract = find_nearest_option(strategy,"PE")
 
     strategy.enter_initial_position(ce_contract, pe_contract)
 
@@ -278,30 +189,3 @@ def bootstrap_strategy(strategy, market_data, underlying_key, expiry):
         ce_contract["instrument_key"],
         pe_contract["instrument_key"]
     ]
-
-
-class Strategy:
-
-    def __init__(self, state, market_data):
-        self.state = state
-        self.market_data = market_data
-
-    def enter_initial_position(self, ce_contract, pe_contract):
-        ce_position = create_position(ce_contract, num_lots=self.state.lot_size, sl_pct=0.20)
-        pe_position = create_position(pe_contract, num_lots=self.state.lot_size, sl_pct=0.20)
-        self.state.enter_hedged(ce_position, pe_position)
-        print("Initial positions created")
-        print_state(self.state, self.market_data)
-
-    def on_tick(self, instrument_key, ltp):
-        if instrument_key not in self.market_data.contracts_by_instrument_key:
-            return
-        self.market_data.update_ltp(instrument_key, ltp)
-        update_live_pnl(self.state, self.market_data)
-        state_changed = False
-        if self.state.mode == Mode.HEDGED:
-            state_changed = check_hedged_sl(self.state, self.market_data)
-        else:
-            state_changed = check_directional_sl(self.state, self.market_data)
-        if state_changed:
-            print_state(self.state, self.market_data)

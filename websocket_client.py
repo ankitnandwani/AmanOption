@@ -1,16 +1,13 @@
 
 import upstox_client
 
-from config import ACCESS_TOKEN
-
-
 class WebSocketClient:
 
-    def __init__(self, strategy, initial_instrument_keys):
+    def __init__(self, strategy, initial_instrument_keys, access_token):
         self.strategy = strategy
         self.initial_instrument_keys = initial_instrument_keys
         configuration = upstox_client.Configuration()
-        configuration.access_token = ACCESS_TOKEN
+        configuration.access_token = access_token
         api_client = upstox_client.ApiClient(configuration)
         self.streamer = upstox_client.MarketDataStreamerV3(api_client)
         self.register_callbacks()
