@@ -5,6 +5,7 @@ from upstox_service import get_option_contracts
 from utils import build_market_data
 from websocket_client import WebSocketClient
 
+
 def start_strategy(config: StrategyConfig):
     print("Loading option contracts...")
     contracts = get_option_contracts(config.access_token, config.underlying_key)

@@ -17,7 +17,11 @@ class Strategy:
         ce_position = create_position(self, ce_contract)
         pe_position = create_position(self, pe_contract)
         self.state.enter_hedged(ce_position, pe_position)
-        self.events.info("Initial positions created")
+        self.events.info(
+            f"Entered HEDGED position | "
+            f"CE {ce_position.strike_price} @ {ce_position.entry_price:.2f} | "
+            f"PE {pe_position.strike_price} @ {pe_position.entry_price:.2f}"
+        )
 
     def _position_to_dict(self, position):
         if position is None:
@@ -51,8 +55,8 @@ class Strategy:
         return {
             "mode": self.state.mode.value,
             "active_side": self.state.active_side,
-            "realized_pnl": self.state.realized_pnl,
-            "total_pnl": calculate_total_pnl(self),
+            "realized_pnl": round(self.state.realized_pnl, 2),
+            "total_pnl": round(calculate_total_pnl(self), 2),
             "ce": self._position_to_dict(self.state.ce_position),
             "pe": self._position_to_dict(self.state.pe_position),
             "running": True

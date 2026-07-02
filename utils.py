@@ -9,6 +9,7 @@ def get_ltp(position, market_data):
 
     return contract.get("ltp")
 
+
 def calculate_position_pnl(position, ltp):
     pnl = (position.entry_price - ltp) * position.quantity
     position.pnl = pnl

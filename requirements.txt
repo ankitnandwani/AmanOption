@@ -4,3 +4,4 @@ upstox-python-sdk==2.27.0
 protobuf==6.33.6
 websocket-client==1.9.0
 pandas==2.3.3
+streamlit-autorefresh

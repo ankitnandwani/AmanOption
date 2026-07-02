@@ -175,13 +175,14 @@ def run_strategy(strategy):
 
     return True
 
+
 def bootstrap_strategy(strategy, underlying_key, expiry):
     market_data = strategy.market_data
     option_chain = get_option_chain(strategy, underlying_key, expiry)
     refresh_option_chain_prices(market_data, option_chain)
 
     ce_contract = find_nearest_option(strategy, "CE")
-    pe_contract = find_nearest_option(strategy,"PE")
+    pe_contract = find_nearest_option(strategy, "PE")
 
     strategy.enter_initial_position(ce_contract, pe_contract)
 
