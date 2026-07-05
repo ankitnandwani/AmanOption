@@ -2,6 +2,9 @@ Taiga link: https://tree.taiga.io/project/mbatra3-aman-options-strategy/kanban
 
 Live Hosted App: https://amanoptions.streamlit.app/
 
+Strategy to run on days:
+1. MTF- Nifty
+2. WTh- Sensex
 
 <img width="855" height="1280" alt="image" src="https://github.com/user-attachments/assets/621481a5-7d89-4048-b072-d53a16161ec1" />
 
