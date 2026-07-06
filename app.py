@@ -11,7 +11,6 @@ st.set_page_config(
 )
 
 st.title("📈 Options Trading Bot")
-st_autorefresh(interval=1000, key="dashboard_refresh")
 
 # -------------------------
 # Sidebar
@@ -76,14 +75,12 @@ with col2:
 metric1, metric2, metric3, metric4 = st.columns(4)
 
 if "strategy" in st.session_state:
-
+    st_autorefresh(interval=1000, key="dashboard_refresh")
     snapshot = st.session_state.strategy.get_snapshot()
-
     metric1.metric("Mode", snapshot["mode"])
     metric2.metric("Active Side", snapshot["active_side"])
     metric3.metric("Realized PnL", f"₹{snapshot['realized_pnl']:.2f}")
     metric4.metric("Total PnL", f"₹{snapshot['total_pnl']:.2f}")
-
 else:
     metric1.metric("Mode", "-")
     metric2.metric("Active Side", "-")
@@ -119,9 +116,7 @@ st.subheader("Logs")
 log_placeholder = st.empty()
 
 if "strategy" in st.session_state:
-
     logs = st.session_state.strategy.events.get_logs()
-
     text = "\n".join(
         f"[{log.timestamp.strftime('%H:%M:%S')}] "
         f"{log.level:<5} "
