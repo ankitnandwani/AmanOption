@@ -1,3 +1,5 @@
+import os
+
 from nicegui import ui
 
 from bootstrap import start_strategy
@@ -234,5 +236,7 @@ with ui.column().classes("w-full max-w-7xl mx-auto p-6 gap-6"):
 
 
 ui.run(
-    title="Options Trading Bot"
+    title="Options Trading Bot",
+    host="0.0.0.0",
+    port=int(os.environ.get("PORT", 8080)),
 )
