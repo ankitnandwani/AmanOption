@@ -22,6 +22,7 @@ class Strategy:
             f"CE {ce_position.strike_price} @ {ce_position.entry_price:.2f} | "
             f"PE {pe_position.strike_price} @ {pe_position.entry_price:.2f}"
         )
+        self.events.state_changed()
 
     def _position_to_dict(self, position):
         if position is None:
@@ -43,13 +44,13 @@ class Strategy:
             return
         self.market_data.update_ltp(instrument_key, ltp)
         update_live_pnl(self)
-        state_changed = False
         if self.state.mode == Mode.HEDGED:
             state_changed = check_hedged_sl(self)
         else:
             state_changed = check_directional_sl(self)
         if state_changed:
-            self.events.info("Strategy state updated")
+            self.events.info("Position updated")
+        self.events.state_changed()
 
     def get_snapshot(self):
         return {
@@ -61,3 +62,9 @@ class Strategy:
             "pe": self._position_to_dict(self.state.pe_position),
             "running": True
         }
+
+    def publish_snapshot(self):
+        self.events.publish({
+            "type": "snapshot",
+            "data": self.get_snapshot()
+        })
