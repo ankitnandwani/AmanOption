@@ -1,4 +1,4 @@
-from models import MarketData
+from models.models import MarketData
 
 
 def get_ltp(position, market_data):

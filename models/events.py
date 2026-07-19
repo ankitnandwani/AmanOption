@@ -15,29 +15,37 @@ class EventBus:
         self.logs = []
         self.listeners = []
 
-    def info(self, message):
+    def log(self, level, message):
         event = LogEvent(
-                timestamp=datetime.now(),
-                level="INFO",
-                message=message
+            timestamp=datetime.now(),
+            level=level,
+            message=message
         )
+
         self.logs.append(event)
+
         self.publish({
             "type": "log",
             "data": event
         })
 
+    def info(self, message):
+        self.log("INFO", message)
+
     def error(self, message):
-        event = LogEvent(
-                timestamp=datetime.now(),
-                level="ERROR",
-                message=message
-        )
-        self.logs.append(event)
-        self.publish({
-            "type": "log",
-            "data": event
-        })
+        self.log("ERROR", message)
+
+    def warning(self, message):
+        self.log("WARNING", message)
+
+    def debug(self, message):
+        self.log("DEBUG", message)
+
+    def trade(self, message):
+        self.log("TRADE", message)
+
+    def pnl(self, message):
+        self.log("PNL", message)
 
     def get_logs(self):
         return self.logs
@@ -59,4 +67,13 @@ class EventBus:
     def state_changed(self):
         self.publish({
             "type": "state_changed"
+        })
+
+    def progress(self, stage, current=None, total=None):
+
+        self.publish({
+            "type": "progress",
+            "stage": stage,
+            "current": current,
+            "total": total,
         })

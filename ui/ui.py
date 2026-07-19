@@ -1,18 +1,24 @@
 import os
+import threading
+import traceback
+from queue import Queue
+from threading import Thread
 
 from nicegui import ui
 
-from bootstrap import start_strategy
-from models import StrategyConfig
+from models.config import UPSTOX_ACCESS_TOKEN
+from backtest.bootstrap import start_live
+from backtest.backtest import start_backtest
+from models.models import StrategyConfig
 
 strategy = None
 websocket = None
+result_queue = Queue()
 
 
 # -----------------------------
 # Event handlers
 # -----------------------------
-
 def handle_event(event):
     if event["type"] == "log":
         append_log(event["data"])
@@ -23,6 +29,8 @@ def handle_event(event):
 
 def refresh_dashboard():
     snapshot = strategy.get_snapshot()
+
+    print("Dashboard snapshot:", snapshot["realized_pnl"], snapshot["total_pnl"])
 
     status_badge.set_text("Connected")
     status_badge.props("color=positive")
@@ -77,12 +85,12 @@ def append_log(log):
 def start():
     global strategy, websocket
 
-    if strategy is not None:
+    if mode.value == "live" and strategy is not None:
         ui.notify("Strategy already running")
         return
 
     config = StrategyConfig(
-        access_token=access_token.value,
+        access_token=UPSTOX_ACCESS_TOKEN,
         underlying_key=underlying.value,
         lots=int(lots.value),
         target_premium=float(target.value),
@@ -90,12 +98,104 @@ def start():
         max_loss=float(max_loss.value),
     )
 
-    strategy, websocket = start_strategy(config)
+    run_button.disable()
+
+    loading_dialog.open()
+
+    if mode.value == "live":
+        strategy, websocket = start_live(config)
+    else:
+        Thread(
+            target=run_backtest_worker,
+            args=(
+                config,
+                backtest_date.value,
+            ),
+            daemon=True,
+        ).start()
+
+        return
 
     strategy.events.subscribe(handle_event)
 
+    refresh_dashboard()
+
+    run_button.enable()
+
+    if mode.value == "backtest":
+        strategy = None
+        websocket = None
+
     ui.notify("Strategy Started")
 
+def run_backtest_worker(config, replay_date):
+
+    try:
+
+        strategy, historical  = start_backtest(
+            config=config,
+            replay_date=replay_date,
+        )
+
+        result_queue.put(
+            (
+                "success",
+                (
+                    strategy,
+                    historical,
+                ),
+            )
+        )
+
+    except Exception as e:
+        traceback.print_exc()
+        result_queue.put(
+            ("error", e)
+        )
+
+def check_backtest_finished():
+    global strategy
+    global websocket
+
+    if result_queue.empty():
+        return
+
+
+    status, value = result_queue.get()
+
+    loading_dialog.close()
+
+    run_button.enable()
+
+    if status == "error":
+
+        ui.notify(
+            str(value),
+            type="negative",
+        )
+
+        return
+
+    strategy, historical = value
+    websocket = None
+    strategy.events.subscribe(handle_event)
+
+    refresh_dashboard()
+
+    strategy.bootstrap_and_replay(historical)
+
+    ui.notify(
+        "Backtest Completed",
+        type="positive",
+    )
+
+    strategy = None
+    websocket = None
+
+
+ui.colors(
+    primary="#2563eb",
+)
 
 # -----------------------------
 # Sidebar
@@ -129,7 +229,7 @@ with ui.left_drawer(value=True).classes("bg-grey-1 p-4"):
 
     with ui.row():
 
-        ui.button(
+        run_button = ui.button(
             "▶ Run",
             on_click=start,
         ).props("color=positive")
@@ -142,6 +242,28 @@ with ui.left_drawer(value=True).classes("bg-grey-1 p-4"):
 # -----------------------------
 # Main Page
 # -----------------------------
+with ui.dialog().props("persistent") as loading_dialog:
+
+    with ui.card().classes(
+        "items-center p-8"
+    ):
+
+        ui.spinner(
+            size="4rem"
+        )
+
+        ui.label(
+            "Running Backtest..."
+        ).classes(
+            "text-xl font-bold mt-4"
+        )
+
+        ui.label(
+            "Downloading historical data.\nPlease wait..."
+        ).classes(
+            "text-gray-500 text-center"
+        )
+
 
 with ui.column().classes("w-full max-w-7xl mx-auto p-6 gap-6"):
 
@@ -149,9 +271,18 @@ with ui.column().classes("w-full max-w-7xl mx-auto p-6 gap-6"):
         "text-3xl font-bold"
     )
 
-    ui.label(
-        "Event-driven Options Selling Dashboard"
-    ).classes("text-grey")
+    mode = ui.radio(
+        {
+            "live": "Live",
+            "backtest": "Backtest",
+        },
+        value="live",
+    ).props("inline")
+
+    backtest_date = ui.input(
+        label="Backtest Date",
+        value="2026-07-14",
+    )
 
     status_badge = ui.badge(
         "Disconnected"
@@ -234,9 +365,14 @@ with ui.column().classes("w-full max-w-7xl mx-auto p-6 gap-6"):
 
     log_area = ui.log(max_lines=500).classes("w-full h-80")
 
+ui.timer(
+    0.25,
+    check_backtest_finished,
+)
 
 ui.run(
     title="Options Trading Bot",
     host="0.0.0.0",
     port=int(os.environ.get("PORT", 8080)),
+    favicon="📈",
 )

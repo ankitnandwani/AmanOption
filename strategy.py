@@ -1,7 +1,6 @@
-from events import EventBus
-from models import Mode
-from strategy_service import create_position, update_live_pnl, check_hedged_sl, check_directional_sl, \
-    calculate_total_pnl
+from backtest.replay_engine import run_replay
+from models.events import EventBus
+from services.strategy_service import create_position, calculate_total_pnl, run_strategy, bootstrap_backtest
 from utils import get_ltp
 
 
@@ -12,6 +11,7 @@ class Strategy:
         self.market_data = market_data
         self.config = config
         self.events = EventBus()
+        self.running = True
 
     def enter_initial_position(self, ce_contract, pe_contract):
         ce_position = create_position(self, ce_contract)
@@ -43,21 +43,14 @@ class Strategy:
         if instrument_key not in self.market_data.contracts_by_instrument_key:
             return
         self.market_data.update_ltp(instrument_key, ltp)
-        update_live_pnl(self)
-        if self.state.mode == Mode.HEDGED:
-            state_changed = check_hedged_sl(self)
-        else:
-            state_changed = check_directional_sl(self)
-        if state_changed:
-            self.events.info("Position updated")
-        self.events.state_changed()
+        return run_strategy(self)
 
     def get_snapshot(self):
         return {
             "mode": self.state.mode.value,
             "active_side": self.state.active_side,
             "realized_pnl": round(self.state.realized_pnl, 2),
-            "total_pnl": round(calculate_total_pnl(self), 2),
+            "total_pnl": round(calculate_total_pnl(self.state), 2),
             "ce": self._position_to_dict(self.state.ce_position),
             "pe": self._position_to_dict(self.state.pe_position),
             "running": True
@@ -68,3 +61,26 @@ class Strategy:
             "type": "snapshot",
             "data": self.get_snapshot()
         })
+
+    def get_subscribed_instruments(self):
+        instruments = []
+
+        if self.state.ce_position:
+            instruments.append(self.state.ce_position.instrument_key)
+
+        if self.state.pe_position:
+            instruments.append(self.state.pe_position.instrument_key)
+
+        return instruments
+
+
+    def bootstrap_and_replay(self, historical):
+        bootstrap_backtest(
+            strategy=self,
+            historical=historical,
+        )
+
+        run_replay(
+            strategy=self,
+            historical_data=historical,
+        )

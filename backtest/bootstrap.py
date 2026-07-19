@@ -1,13 +1,12 @@
-from models import StrategyState, Mode, StrategyConfig
+from models.models import StrategyState, Mode, StrategyConfig
 from strategy import Strategy
-from strategy_service import bootstrap_strategy
-from upstox_service import get_option_contracts
+from services.strategy_service import bootstrap_strategy
+from services.upstox_service import get_option_contracts
 from utils import build_market_data
 from websocket_client import WebSocketClient
 
 
-def start_strategy(config: StrategyConfig):
-    print("Loading option contracts...")
+def start_live(config: StrategyConfig):
     contracts = get_option_contracts(config.access_token, config.underlying_key)
 
     expiries = sorted(
@@ -30,6 +29,8 @@ def start_strategy(config: StrategyConfig):
 
     state.lot_size = config.lots
     strategy = Strategy(state, market_data, config)
+    strategy.events.info("Strategy initialized")
+    strategy.events.info(f"Expiry: {nearest_expiry}")
     instrument_keys = bootstrap_strategy(strategy, config.underlying_key, nearest_expiry)
     websocket = WebSocketClient(strategy, instrument_keys, config.access_token)
     websocket.connect()

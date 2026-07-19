@@ -1,5 +1,6 @@
 import requests
-from config import BASE_URL
+from models.config import BASE_URL
+
 
 def get_headers(access_token):
     return {
@@ -7,12 +8,19 @@ def get_headers(access_token):
         "Authorization": f"Bearer {access_token}"
     }
 
-def get_option_contracts(access_token, instrument_key):
-    url = f"{BASE_URL}/option/contract"
 
+def get_option_contracts(
+        access_token: str,
+        instrument_key: str,
+        expiry_date: str | None = None,
+):
+    url = f"{BASE_URL}/option/contract"
+    params = {"instrument_key": instrument_key}
+    if expiry_date:
+        params["expiry_date"] = expiry_date
     response = requests.get(
         url=url,
-        params={"instrument_key": instrument_key},
+        params=params,
         headers=get_headers(access_token)
     )
 

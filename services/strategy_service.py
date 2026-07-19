@@ -1,7 +1,7 @@
 from datetime import datetime
-from models import Position, Mode
-from upstox_service import get_option_chain, refresh_option_chain_prices
-from utils import get_ltp, calculate_position_pnl, build_market_data
+from models.models import Position, Mode, StrategyState
+from services.upstox_service import get_option_chain, refresh_option_chain_prices
+from utils import get_ltp, calculate_position_pnl
 
 
 def find_nearest_option(strategy, option_type):
@@ -68,6 +68,7 @@ def square_off(strategy):
     state.ce_position = None
     state.pe_position = None
     state.active_side = "NONE"
+    update_live_pnl(strategy)
 
 
 def is_sl_hit(position, current_ltp):
@@ -128,8 +129,7 @@ def check_directional_sl(strategy):
     return False
 
 
-def calculate_total_pnl(strategy):
-    state = strategy.state
+def calculate_total_pnl(state: StrategyState):
     total = state.realized_pnl
 
     if state.ce_position:
@@ -138,6 +138,7 @@ def calculate_total_pnl(strategy):
     if state.pe_position:
         total += state.pe_position.pnl
 
+    state.total_pnl = total
     return total
 
 
@@ -163,16 +164,30 @@ def run_strategy(strategy):
     update_live_pnl(strategy)
 
     if is_max_loss_hit(strategy):
-        strategy.events.info()
-        strategy.events.info("MAX LOSS HIT")
+        strategy.events.error(
+            "Maximum daily loss reached. Stopping strategy."
+        )
         square_off(strategy)
+        strategy.events.state_changed()
         return False
 
     if state.mode == Mode.HEDGED:
-        check_hedged_sl(strategy)
+        state_changed = check_hedged_sl(strategy)
+        strategy.events.info(
+            f"Total PnL={state.total_pnl:.2f}, "
+            f"Realized={state.realized_pnl:.2f}"
+        )
     elif state.mode == Mode.DIRECTIONAL:
-        check_directional_sl(strategy)
+        state_changed = check_directional_sl(strategy)
+        strategy.events.info(
+            f"Total PnL={state.total_pnl:.2f}, "
+            f"Realized={state.realized_pnl:.2f}"
+        )
 
+    if state_changed:
+        strategy.events.info("Position updated")
+
+    strategy.events.state_changed()
     return True
 
 
@@ -189,4 +204,29 @@ def bootstrap_strategy(strategy, underlying_key, expiry):
     return [
         ce_contract["instrument_key"],
         pe_contract["instrument_key"]
+    ]
+
+def bootstrap_backtest(strategy, historical):
+    market_data = strategy.market_data
+
+    # Initialize every contract's LTP from its first candle
+    for instrument_key, candles in historical.items():
+        if not candles:
+            continue
+
+        first_candle = candles[0]
+
+        contract = market_data.contracts_by_instrument_key.get(instrument_key)
+
+        if contract:
+            contract["ltp"] = first_candle.open
+
+    ce_contract = find_nearest_option(strategy, "CE")
+    pe_contract = find_nearest_option(strategy, "PE")
+
+    strategy.enter_initial_position(ce_contract, pe_contract)
+
+    return [
+        ce_contract["instrument_key"],
+        pe_contract["instrument_key"],
     ]
