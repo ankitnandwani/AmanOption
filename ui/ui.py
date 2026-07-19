@@ -89,8 +89,13 @@ def start():
         ui.notify("Strategy already running")
         return
 
+    token = access_token.value.strip()
+
+    if not token:
+        token = UPSTOX_ACCESS_TOKEN
+
     config = StrategyConfig(
-        access_token=UPSTOX_ACCESS_TOKEN,
+        access_token=token,
         underlying_key=underlying.value,
         lots=int(lots.value),
         target_premium=float(target.value),
