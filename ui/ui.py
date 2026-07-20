@@ -1,4 +1,5 @@
 import os
+import threading
 import traceback
 from datetime import date
 from queue import Queue
@@ -370,6 +371,14 @@ def render_multiday_results(result):
 
 ui.colors(
     primary="#2563eb",
+)
+
+ui.timer(
+    5,
+    lambda: print(
+        "Heartbeat",
+        threading.current_thread().name,
+    ),
 )
 
 # -----------------------------
