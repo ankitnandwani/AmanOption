@@ -1,3 +1,5 @@
+import time
+
 from services.strategy_service import square_off
 
 
@@ -52,6 +54,7 @@ def run_replay(strategy, historical_data):
 
                 if not running:
                     break
+        time.sleep(0.001)
 
     if (
             strategy.state.ce_position is not None

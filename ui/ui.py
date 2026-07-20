@@ -217,9 +217,7 @@ def run_multiday_worker(
     try:
 
         backtester = Backtester()
-
         backtester.events.subscribe(handle_event)
-
         result = backtester.run_date_range(
             config=config,
             start_date=start_date,
@@ -371,14 +369,6 @@ def render_multiday_results(result):
 
 ui.colors(
     primary="#2563eb",
-)
-
-ui.timer(
-    5,
-    lambda: print(
-        "Heartbeat",
-        threading.current_thread().name,
-    ),
 )
 
 # -----------------------------
