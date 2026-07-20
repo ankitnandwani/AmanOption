@@ -372,6 +372,11 @@ ui.colors(
     primary="#2563eb",
 )
 
+ui.timer(
+    10,
+    lambda: append_log("Backtest still running...")
+)
+
 # -----------------------------
 # Sidebar
 # -----------------------------
