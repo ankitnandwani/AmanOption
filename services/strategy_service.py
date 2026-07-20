@@ -224,6 +224,12 @@ def bootstrap_backtest(strategy, historical):
     ce_contract = find_nearest_option(strategy, "CE")
     pe_contract = find_nearest_option(strategy, "PE")
 
+    if ce_contract is None or pe_contract is None:
+        raise RuntimeError(
+            "No valid option contracts found. "
+            "Market may be closed or historical data is unavailable."
+        )
+
     strategy.enter_initial_position(ce_contract, pe_contract)
 
     return [

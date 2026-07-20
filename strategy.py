@@ -74,13 +74,13 @@ class Strategy:
         return instruments
 
 
-    def bootstrap_and_replay(self, historical):
+    def run_backtest(self, historical):
         bootstrap_backtest(
             strategy=self,
             historical=historical,
         )
 
-        run_replay(
+        return run_replay(
             strategy=self,
             historical_data=historical,
         )

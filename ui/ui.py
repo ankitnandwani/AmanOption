@@ -1,11 +1,12 @@
 import os
-import threading
 import traceback
+from datetime import date
 from queue import Queue
 from threading import Thread
 
 from nicegui import ui
 
+from backtest.backtester import Backtester
 from models.config import UPSTOX_ACCESS_TOKEN
 from backtest.bootstrap import start_live
 from backtest.backtest import start_backtest
@@ -14,7 +15,7 @@ from models.models import StrategyConfig
 strategy = None
 websocket = None
 result_queue = Queue()
-
+multi_result_queue = Queue()
 
 # -----------------------------
 # Event handlers
@@ -29,8 +30,6 @@ def handle_event(event):
 
 def refresh_dashboard():
     snapshot = strategy.get_snapshot()
-
-    print("Dashboard snapshot:", snapshot["realized_pnl"], snapshot["total_pnl"])
 
     status_badge.set_text("Connected")
     status_badge.props("color=positive")
@@ -109,12 +108,23 @@ def start():
 
     if mode.value == "live":
         strategy, websocket = start_live(config)
-    else:
+    elif mode.value == "singleDayBacktest":
         Thread(
             target=run_backtest_worker,
             args=(
                 config,
                 backtest_date.value,
+            ),
+            daemon=True,
+        ).start()
+        return
+    elif mode.value == "multiDayBacktest":
+        Thread(
+            target=run_multiday_worker,
+            args=(
+                config,
+                start_date.value,
+                end_date.value,
             ),
             daemon=True,
         ).start()
@@ -187,7 +197,7 @@ def check_backtest_finished():
 
     refresh_dashboard()
 
-    strategy.bootstrap_and_replay(historical)
+    snapshot = strategy.run_backtest(historical)
 
     ui.notify(
         "Backtest Completed",
@@ -196,6 +206,166 @@ def check_backtest_finished():
 
     strategy = None
     websocket = None
+
+
+def run_multiday_worker(
+        config,
+        start_date,
+        end_date,
+):
+    try:
+
+        backtester = Backtester()
+
+        backtester.events.subscribe(handle_event)
+
+        result = backtester.run_date_range(
+            config=config,
+            start_date=start_date,
+            end_date=end_date,
+        )
+
+        multi_result_queue.put(
+            ("success", result)
+        )
+
+    except Exception as e:
+        traceback.print_exc()
+
+        multi_result_queue.put(
+            ("error", e)
+        )
+
+
+def check_multiday_finished():
+    if multi_result_queue.empty():
+        return
+
+    status, value = multi_result_queue.get()
+
+    loading_dialog.close()
+
+    run_button.enable()
+
+    if status == "error":
+        ui.notify(
+            str(value),
+            type="negative",
+        )
+
+        return
+
+    ui.notify(
+        "Multi-day backtest completed",
+        type="positive",
+    )
+
+    render_multiday_results(value)
+
+def update_mode():
+    replay_container.set_visibility(
+        mode.value == "singleDayBacktest"
+    )
+
+    multi_container.set_visibility(
+        mode.value == "multiDayBacktest"
+    )
+
+    dashboard_container.set_visibility(
+        mode.value != "multiDayBacktest"
+    )
+
+
+def render_multiday_results(result):
+    multi_results_container.clear()
+    multi_results_container.set_visibility(True)
+    with (((((multi_results_container))))):
+        ui.label(
+            "📊 Multi-Day Backtest Summary"
+        ).classes("text-h5")
+
+        with ui.row().classes("gap-6"):
+
+            ui.label(f"Days : {result.total_days}")
+
+            ui.label(
+                f"Winning : {result.profitable_days}"
+            )
+
+            ui.label(
+                f"Losing : {result.losing_days}"
+            )
+
+            ui.label(
+                f"Win Rate : {result.win_rate:.1f}%"
+            )
+
+        with ui.row().classes("gap-6"):
+            ui.label(
+                f"Total PnL : ₹{result.total_pnl:.2f}"
+            )
+
+            ui.label(
+                f"Average : ₹{result.average_pnl:.2f}"
+            )
+
+            ui.label(
+                f"Best : ₹{result.best_day.pnl:.2f}"
+            )
+
+            ui.label(
+                f"Worst : ₹{result.worst_day.pnl:.2f}"
+            )
+
+        ui.separator()
+
+        rows = []
+
+        for day in result.days:
+            rows.append(
+                {
+                    "date": day.date,
+                    "pnl": round(day.pnl, 2),
+                    "color": (
+                        "positive"
+                        if day.pnl > 0
+                        else "negative"
+                        if day.pnl < 0
+                        else ""
+                    ),
+                }
+            )
+
+        columns = [
+            {
+                "name": "date",
+                "label": "Date",
+                "field": "date",
+            },
+            {
+                "name": "pnl",
+                "label": "PnL",
+                "field": "pnl",
+            },
+        ]
+
+        table = ui.table(
+            columns=columns,
+            rows=rows,
+            row_key="date",
+        ).props("dense flat bordered").classes("w-96")
+
+        table.add_slot(
+            "body-cell-pnl",
+            r'''
+            <q-td :props="props">
+                <span
+                    :class="props.row.pnl >= 0 ? 'text-positive' : 'text-negative'">
+                    {{ props.row.pnl.toFixed(2) }}
+                </span>
+            </q-td>
+            '''
+        )
 
 
 ui.colors(
@@ -269,7 +439,6 @@ with ui.dialog().props("persistent") as loading_dialog:
             "text-gray-500 text-center"
         )
 
-
 with ui.column().classes("w-full max-w-7xl mx-auto p-6 gap-6"):
 
     ui.label("📈 Options Trading Bot").classes(
@@ -279,23 +448,42 @@ with ui.column().classes("w-full max-w-7xl mx-auto p-6 gap-6"):
     mode = ui.radio(
         {
             "live": "Live",
-            "backtest": "Backtest",
+            "singleDayBacktest": "Single Day Backtest",
+            "multiDayBacktest": "Multi Day Backtest",
         },
         value="live",
     ).props("inline")
 
-    backtest_date = ui.input(
-        label="Backtest Date",
-        value="2026-07-14",
-    )
+    replay_container = ui.column()
+
+    with replay_container:
+        backtest_date = ui.input(
+            "Replay Date",
+            value=date.today().isoformat(),
+            placeholder="YYYY-MM-DD",
+        ).props("outlined")
+
+    multi_container = ui.column()
+
+    with multi_container:
+        with ui.row().classes("w-full gap-6"):
+            start_date = ui.input(
+                "Start Date",
+                value=date.today().replace(day=1).isoformat(),
+            ).props("outlined").classes("flex-1")
+
+            end_date = ui.input(
+                "End Date",
+                value=date.today().isoformat(),
+            ).props("outlined").classes("flex-1")
 
     status_badge = ui.badge(
         "Disconnected"
     ).props("color=negative")
 
     # Metrics
-
-    with ui.row().classes("gap-4"):
+    dashboard_container = ui.row().classes("w-full gap-4 items-stretch")
+    with dashboard_container:
 
         with ui.card().classes("items-center w-40"):
             ui.label("Mode")
@@ -313,10 +501,7 @@ with ui.column().classes("w-full max-w-7xl mx-auto p-6 gap-6"):
             ui.label("Total")
             total_label = ui.label("₹0").classes("text-h5")
 
-    # Positions
-
-    with ui.row().classes("w-full gap-4 items-stretch"):
-
+        # Positions
         ce_widgets = {}
 
         with ui.card().classes("flex-1"):
@@ -336,12 +521,6 @@ with ui.column().classes("w-full max-w-7xl mx-auto p-6 gap-6"):
 
                 ui.label("PnL")
                 ce_widgets["pnl"] = ui.label("-").classes("font-bold")
-
-            # ce_widgets["strike"] = ui.label("-")
-            # ce_widgets["entry"] = ui.label("-")
-            # ce_widgets["ltp"] = ui.label("-")
-            # ce_widgets["sl"] = ui.label("-")
-            # ce_widgets["pnl"] = ui.label("-").classes("font-bold text-lg")
 
         pe_widgets = {}
 
@@ -364,15 +543,28 @@ with ui.column().classes("w-full max-w-7xl mx-auto p-6 gap-6"):
                 ui.label("PnL")
                 pe_widgets["pnl"] = ui.label("-").classes("font-bold")
 
-    ui.separator()
+    mode.on_value_change(
+        lambda _: update_mode()
+    )
 
-    ui.label("Logs").classes("text-h6")
+    update_mode()
 
-    log_area = ui.log(max_lines=500).classes("w-full h-80")
+ui.separator()
+multi_results_container = ui.column().classes("w-full")
+multi_results_container.set_visibility(False)
+
+ui.separator()
+ui.label("Logs").classes("text-h6")
+log_area = ui.log(max_lines=500).classes("w-full h-80")
 
 ui.timer(
     0.25,
     check_backtest_finished,
+)
+
+ui.timer(
+    0.25,
+    check_multiday_finished,
 )
 
 ui.run(
