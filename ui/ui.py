@@ -1,9 +1,12 @@
 import os
 import threading
 import traceback
-from datetime import date
+import json
+from datetime import date, datetime
 from queue import Queue
 from threading import Thread
+from pathlib import Path
+
 
 from nicegui import ui
 
@@ -18,15 +21,62 @@ websocket = None
 result_queue = Queue()
 multi_result_queue = Queue()
 
+RESULTS_DIR = Path("backtest_results")
+RESULTS_DIR.mkdir(exist_ok=True)
+
+def save_backtest_result(job_id, result):
+    result_data = {
+        "total_days": result.total_days,
+        "profitable_days": result.profitable_days,
+        "losing_days": result.losing_days,
+        "win_rate": result.win_rate,
+        "total_pnl": result.total_pnl,
+        "average_pnl": result.average_pnl,
+        "best_day": {"date": result.best_day.date, "pnl": result.best_day.pnl} if result.best_day else None,
+        "worst_day": {"date": result.worst_day.date, "pnl": result.worst_day.pnl} if result.worst_day else None,
+        "days": [{"date": day.date, "pnl": day.pnl} for day in result.days],
+    }
+    with open(RESULTS_DIR / f"{job_id}.json", "w") as f:
+        json.dump(result_data, f)
+    with open(RESULTS_DIR / f"{job_id}.status", "w") as f:
+        f.write("completed")
+
+def set_job_status(job_id, status):
+    with open(RESULTS_DIR / f"{job_id}.status", "w") as f:
+        f.write(status)
+
+def load_backtest_results():
+    results = []
+    for file in sorted(RESULTS_DIR.glob("*.json"), reverse=True):
+        job_id = file.stem
+        status_file = RESULTS_DIR / f"{job_id}.status"
+        status = "unknown"
+        if status_file.exists():
+            status = status_file.read_text().strip()
+
+        with open(file, "r") as f:
+            data = json.load(f)
+            results.append({"job_id": job_id, "data": data, "status": status})
+    return results
+
+def dict_to_backtest_result(data):
+    from models.backtest_result import DayResult, BacktestResult
+    days = [DayResult(day["date"], day["pnl"]) for day in data["days"]]
+    return BacktestResult(days=days)
+
 # -----------------------------
 # Event handlers
 # -----------------------------
 def handle_event(event):
-    if event["type"] == "log":
-        append_log(event["data"])
+    try:
+        if event["type"] == "log":
+            append_log(event["data"])
 
-    elif event["type"] == "state_changed":
-        refresh_dashboard()
+        elif event["type"] == "state_changed":
+            refresh_dashboard()
+    except Exception:
+        # Ignore errors if the UI client is gone or unavailable
+        pass
 
 
 def refresh_dashboard():
@@ -120,16 +170,18 @@ def start():
         ).start()
         return
     elif mode.value == "multiDayBacktest":
+        job_id = f"job_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         Thread(
             target=run_multiday_worker,
             args=(
                 config,
                 start_date.value,
                 end_date.value,
+                job_id,
             ),
             daemon=True,
         ).start()
-
+        ui.notify(f"Backtest started in background!\nJob ID: {job_id}\nYou can close this tab and check History later.", type="info")
         return
 
     strategy.events.subscribe(handle_event)
@@ -213,7 +265,9 @@ def run_multiday_worker(
         config,
         start_date,
         end_date,
+        job_id,
 ):
+    set_job_status(job_id, "running")
     try:
 
         backtester = Backtester()
@@ -224,13 +278,14 @@ def run_multiday_worker(
             end_date=end_date,
         )
 
+        save_backtest_result(job_id, result)
         multi_result_queue.put(
             ("success", result)
         )
 
     except Exception as e:
         traceback.print_exc()
-
+        set_job_status(job_id, f"failed: {e}")
         multi_result_queue.put(
             ("error", e)
         )
@@ -547,6 +602,31 @@ with ui.column().classes("w-full max-w-7xl mx-auto p-6 gap-6"):
     )
 
     update_mode()
+
+ui.separator()
+history_container = ui.column().classes("w-full")
+history_container.set_visibility(False)
+
+def show_history():
+    history_container.set_visibility(not history_container.visible)
+    if history_container.visible:
+        history_container.clear()
+        with history_container:
+            ui.label("📜 Backtest History").classes("text-h5")
+            results = load_backtest_results()
+            if not results:
+                ui.label("No previous results found.")
+                return
+
+            for res in results:
+                with ui.card().classes("w-full mb-4"):
+                    with ui.row().classes("items-center justify-between w-full"):
+                            status_color = "positive" if res['status'] == "completed" else "negative" if "failed" in res['status'] else "orange"
+                            ui.label(f"Job: {res['job_id']}").classes("font-bold")
+                            ui.badge(res['status']).props(f"color={status_color}")
+                            ui.button("View", on_click=lambda r=res: render_multiday_results(dict_to_backtest_result(r['data']))).props("flat")
+
+ui.button("🕒 View History", on_click=show_history).props("outline")
 
 ui.separator()
 multi_results_container = ui.column().classes("w-full")

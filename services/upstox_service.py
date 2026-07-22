@@ -1,4 +1,5 @@
 import requests
+import upstox_client
 from models.config import BASE_URL
 
 
@@ -26,6 +27,20 @@ def get_option_contracts(
 
     response.raise_for_status()
     return response.json()
+
+
+def get_expiries(access_token, instrument_key):
+    configuration = upstox_client.Configuration()
+    configuration.access_token = access_token
+    api_instance = upstox_client.ExpiredInstrumentApi(upstox_client.ApiClient(configuration))
+    try:
+        response = api_instance.get_expiries(instrument_key)
+        # The SDK returns a list of expiries or a response object containing them
+        # Based on Upstox docs, it returns a list of strings (dates)
+        return response
+    except Exception as e:
+        print(f"Exception when calling expired instrument v3 api: {e}")
+        return []
 
 
 def get_option_chain(strategy, instrument_key, expiry_date):

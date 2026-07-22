@@ -5,7 +5,7 @@ from backtest.replay_utils import get_replay_expiry
 from models.backtest_result import DayResult, BacktestResult
 from models.events import EventBus
 from models.models import StrategyConfig, StrategyState, Mode
-from services.upstox_service import get_option_contracts
+from services.upstox_service import get_option_contracts, get_expiries
 from strategy import Strategy
 from utils import build_market_data
 
@@ -21,17 +21,18 @@ class Backtester:
         replay_date: str,
     ) -> Strategy:
 
-        contracts = get_option_contracts(
+        expiries = get_expiries(
             config.access_token,
             config.underlying_key,
         )
 
-        expiries = sorted(
-            {
-                c["expiry"]
-                for c in contracts["data"]
-            }
-        )
+        # If the SDK returns a response object instead of a list, handle it.
+        # Most SDKs return a list or a wrapper. Based on Upstox docs, it's the list of dates.
+        if not isinstance(expiries, list):
+            # Attempt to extract data if it's a wrapper object
+            expiries = getattr(expiries, 'data', [])
+
+        expiries = sorted(set(expiries))
 
         replay_expiry = get_replay_expiry(
             replay_date,
