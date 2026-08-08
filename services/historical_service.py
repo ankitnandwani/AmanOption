@@ -89,50 +89,50 @@ def get_historical_candles(
 
     if not data or not isinstance(data, (list, tuple)):
         print(f"API Error: No valid candle data for {instrument_key}. Data type: {type(data)}")
-        return []
-
-    for row in data:
-        if isinstance(row, (list, tuple)):
-            candles.append(
-                Candle(
-                    timestamp=datetime.fromisoformat(
-                        row[0].replace("Z", "+00:00")
-                    ),
-                    open=row[1],
-                    high=row[2],
-                    low=row[3],
-                    close=row[4],
-                    volume=row[5],
-                    oi=row[6],
+        # No valid data; keep candles empty and proceed to caching
+    else:
+        for row in data:
+            if isinstance(row, (list, tuple)):
+                candles.append(
+                    Candle(
+                        timestamp=datetime.fromisoformat(
+                            row[0].replace("Z", "+00:00")
+                        ),
+                        open=row[1],
+                        high=row[2],
+                        low=row[3],
+                        close=row[4],
+                        volume=row[5],
+                        oi=row[6],
+                    )
                 )
-            )
-        else:
-            candles.append(
-                Candle(
-                    timestamp=datetime.fromisoformat(
-                        row.timestamp.replace("Z", "+00:00")
-                    ),
-                    open=row.open,
-                    high=row.high,
-                    low=row.low,
-                    close=row.close,
-                    volume=row.volume,
-                    oi=row.oi,
+            else:
+                candles.append(
+                    Candle(
+                        timestamp=datetime.fromisoformat(
+                            row.timestamp.replace("Z", "+00:00")
+                        ),
+                        open=row.open,
+                        high=row.high,
+                        low=row.low,
+                        close=row.close,
+                        volume=row.volume,
+                        oi=row.oi,
+                    )
                 )
-            )
 
     result = list(reversed(candles))
 
-    if result:
-        # Update the per‑day cache dict and persist it
-        day_cache[instrument_key] = result
-        try:
-            with open(cache_file, "wb") as f:
-                pickle.dump(day_cache, f)
-            print(f"CACHE SAVE: Updated cache for {instrument_key} in {cache_file}")
-        except Exception as e:
-            print(f"Error saving day cache file {cache_file}: {e}")
-    else:
-        print(f"No candles found for {instrument_key}, skipping cache save.")
+    # Update the per‑day cache dict and persist it, even if the result is empty.
+    day_cache[instrument_key] = result
+    try:
+        with open(cache_file, "wb") as f:
+            pickle.dump(day_cache, f)
+        print(f"CACHE SAVE: Updated cache for {instrument_key} in {cache_file}")
+    except Exception as e:
+        print(f"Error saving day cache file {cache_file}: {e}")
+
+    if not result:
+        print(f"No candles found for {instrument_key}. Cached empty result.")
 
     return result
