@@ -5,7 +5,7 @@ from backtest.replay_utils import get_replay_expiry
 from models.backtest_result import DayResult, BacktestResult
 from models.events import EventBus
 from models.models import StrategyConfig, StrategyState, Mode
-from services.upstox_service import get_option_contracts, get_expiries
+from services.upstox_service import get_expiries, get_expired_option_contracts
 from strategy import Strategy
 from utils import build_market_data
 
@@ -39,10 +39,10 @@ class Backtester:
             expiries,
         )
 
-        contracts = get_option_contracts(
+        contracts = get_expired_option_contracts(
             config.access_token,
             config.underlying_key,
-            expiry_date=replay_expiry,
+            replay_expiry,
         )
 
         market_data = build_market_data(
@@ -111,6 +111,7 @@ class Backtester:
                     config,
                     replay_date,
                 )
+
             except Exception as e:
                 self.events.info(
                     f"Skipping {replay_date}: {e}"

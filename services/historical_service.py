@@ -38,7 +38,6 @@ def get_historical_candles(
 
     # Return cached data if we already have candles for this instrument on this day
     if instrument_key in day_cache:
-        print(f"CACHE HIT: Loaded {instrument_key} for {day_key} from {cache_file}")
         return day_cache[instrument_key]
 
     print(f"CACHE MISS: Fetching {instrument_key} from API for {day_key}...")
@@ -128,7 +127,6 @@ def get_historical_candles(
     try:
         with open(cache_file, "wb") as f:
             pickle.dump(day_cache, f)
-        print(f"CACHE SAVE: Updated cache for {instrument_key} in {cache_file}")
     except Exception as e:
         print(f"Error saving day cache file {cache_file}: {e}")
 

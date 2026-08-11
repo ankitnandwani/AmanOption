@@ -18,10 +18,18 @@ def calculate_position_pnl(position, ltp):
 def build_market_data(contracts, expiry):
     market_data = MarketData()
 
-    current_expiry_contracts = [
-        c for c in contracts["data"]
-        if c["expiry"] == expiry
-    ]
+    current_expiry_contracts = []
+    for c in contracts["data"]:
+        c_expiry = c["expiry"]
+        # Normalize datetime objects to YYYY-MM-DD strings for comparison
+        if hasattr(c_expiry, "strftime"):
+            c_expiry_str = c_expiry.strftime("%Y-%m-%d")
+        else:
+            c_expiry_str = str(c_expiry)
+
+        if c_expiry_str == expiry:
+            current_expiry_contracts.append(c)
+
 
     current_expiry_contracts.sort(
         key=lambda x: (
