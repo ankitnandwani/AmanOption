@@ -1,10 +1,10 @@
 # AmanOptions — Data, Cache, and Storage Notes
 
 ## Known current state
-- Local `historical_cache/` exists but is absent from GitHub.
-- Owner reports about 962 `.pkl` files and 3.14 GB in this directory.
-- The current cache behavior is described as: for a requested date, use the local cached file if it exists; otherwise fetch historical data through Upstox and save it for later reuse.
-- Local `backtest_results/` also exists and is absent from GitHub because it contains data files. Its precise purpose and retention policy are not yet known.
+- Local `historical_cache/` contains 962 `.pkl` files (one per trading day) totalling approximately 3.14 GB.
+- Each file is named `YYYY-MM-DD.pkl` and contains a pickle-serialized dict mapping `instrument_key` (string) to a list of `Candle` objects (from `models.models`).
+- The current cache behavior: for a requested date, if `historical_cache/YYYY-MM-DD.pkl` exists, load the dict and return the list for each instrument key; otherwise fetch from Upstox for each instrument and save the dict to the pickle file.
+- Local `backtest_results/` contains per-job JSON result files and status files; used to store backtest outcomes for UI history, not required for runtime backtesting.
 - The cache is intended to be shared across all application visitors.
 - Deployment is on Render Free Web Service, whose local filesystem must not be treated as durable storage.
 
@@ -44,9 +44,9 @@ Use Cloudflare R2 as the durable shared cache and a bounded local cache on Rende
 - Python pickle files can execute code when deserialized. Only load data from the trusted migration/fetch pipeline and restrict write access to the bucket. Consider integrity checks and versioned metadata.
 - The owner should verify that Upstox's applicable terms permit retaining historical market data and making it available through a multi-user application.
 
-## Open questions to resolve from the actual project
-- Are cache files one per date, one per instrument/date, or keyed some other way?
-- What exact structure and schema is serialized?
-- Does the app need `backtest_results/` on Render, or is it only local analysis output?
-- Is there any current cache expiration, invalidation, or data-versioning rule?
-- What local cache size/eviction policy fits Render Free constraints?
+## Resolved questions
+- Cache files are one per date (YYYY-MM-DD.pkl), not per instrument/date.
+- Serialized structure: a dict mapping instrument_key → list of Candle objects (from models.models), where Candle has fields: timestamp (datetime), open, high, low, close (float), volume (int), oi (int).
+- The app does not need `backtest_results/` on Render for runtime backtesting; it stores per-job JSON results for UI history only.
+- No current cache expiration, invalidation, or data-versioning rule; cached data is considered valid indefinitely.
+- Local cache size/eviction policy: to be determined as part of the migration (e.g., LRU with size limit appropriate for Render Free constraints).
