@@ -29,7 +29,7 @@ class WebSocketClient:
         self.streamer.unsubscribe(instrument_keys)
 
     def on_open(self):
-        print("Connected")
+        self.strategy.events.info("Connected")
         self.subscribe(self.initial_instrument_keys)
 
     def on_message(self, message):
@@ -50,8 +50,7 @@ class WebSocketClient:
             self.strategy.on_tick(instrument_key, ltp)
 
     def on_error(self, error):
-        print("WebSocket Error:")
-        print(error)
+        self.strategy.events.error(f"WebSocket error: {error}")
 
     def on_close(self):
-        print("WebSocket Closed")
+        self.strategy.events.info("WebSocket disconnected")

@@ -76,3 +76,16 @@ class StrategyConfig:
     target_premium: float
     sl_pct: float
     max_loss: float
+    mode: str = "LIVE"
+    replay_date: str = ""
+
+
+@dataclass
+class Candle:
+    timestamp: datetime
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: int
+    oi: int
