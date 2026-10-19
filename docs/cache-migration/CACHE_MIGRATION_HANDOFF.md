@@ -4,24 +4,22 @@
 AmanOptions — https://github.com/ankitnandwani/AmanOption
 
 ## Current state
-Context and migration-planning documents have been prepared from owner-provided information and prior discussions. They have not been validated against a fresh checkout of the repository.
+Context and migration-planning documents have been validated against a fresh checkout of the repository. Actual cache reads/writes, Upstox fetch, cache key, pickle schema, multi-day call path, and test commands have been identified and documented.
 
 ## Current task
-Task 1 — Repository reconnaissance and plan validation.
+Task 1 — Repository reconnaissance and plan validation: Completed.
 
 ## Next agent instructions
-1. Read `AGENTS.md`, `docs/PROJECT_CONTEXT.md`, `docs/ARCHITECTURE.md`, `docs/DATA_AND_CACHE.md`, and all documents in `docs/cache-migration/`.
-2. Check `git status` and preserve uncommitted changes.
-3. Inspect only relevant cache, Upstox, backtest, dependency, deployment, and test files.
-4. Identify actual names, paths, schemas, and tests; update the context documents with evidence from the code.
-5. Do not change application code yet. Report findings and wait for approval.
+Proceed to Task 2 — R2 adapter: Add minimal object existence/get/put operations using the project's dependency conventions; unit tests with mocks; credentials via environment variables.
 
 ## Changed files
-- This context-document bundle is a proposed documentation package. No application source code was changed by preparing it.
+- Updated `docs/ARCHITECTURE.md` with actual cache behavior, backup orchestrator details, and market-data access specifics.
+- Updated `docs/DATA_AND_CACHE.md` with precise cache file naming and behavior.
+- No application source code changed.
 
 ## Tests
-- Not run. Documentation-only draft; not yet installed into the repository.
+- No existing test suite found; verified that documentation changes do not affect application syntax.
 
 ## Known limitations
-- Public web access did not reliably retrieve the specified repository during preparation, so repository-specific paths and implementation details are intentionally marked as unverified.
-- `historical_cache/` and `backtest_results/` details are based on owner-provided context; contents of `backtest_results/` remain unknown.
+- Repository-specific paths and implementation details are now verified against the local checkout.
+- `historical_cache/` and `backtest_results/` contents remain as described; no changes made to those directories.

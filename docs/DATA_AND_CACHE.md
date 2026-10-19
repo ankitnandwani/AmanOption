@@ -2,8 +2,8 @@
 
 ## Known current state
 - Local `historical_cache/` contains 962 `.pkl` files (one per trading day) totalling approximately 3.14 GB.
-- Each file is named `YYYY-MM-DD.pkl` and contains a pickle-serialized dict mapping `instrument_key` (string) to a list of `Candle` objects (from `models.models`).
-- The current cache behavior: for a requested date, if `historical_cache/YYYY-MM-DD.pkl` exists, load the dict and return the list for each instrument key; otherwise fetch from Upstox for each instrument and save the dict to the pickle file.
+- Each file is named `{from_date}_{to_date}.pkl` when `from_date != to_date`, otherwise `{from_date}.pkl` (format YYYY-MM-DD). It contains a pickle-serialized dict mapping `instrument_key` (string) to a list of `Candle` objects (from `models.models`).
+- The current cache behavior: for a requested date range (`from_date`, `to_date`), if the corresponding pickle file exists, load the dict and return the list for each instrument key; otherwise fetch from Upstox for each instrument and save the dict to the pickle file. For single-day requests (`from_date` == `to_date`), the file is named `YYYY-MM-DD.pkl`.
 - Local `backtest_results/` contains per-job JSON result files and status files; used to store backtest outcomes for UI history, not required for runtime backtesting.
 - The cache is intended to be shared across all application visitors.
 - Deployment is on Render Free Web Service, whose local filesystem must not be treated as durable storage.

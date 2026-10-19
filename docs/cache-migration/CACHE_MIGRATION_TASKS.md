@@ -2,10 +2,10 @@
 
 Status key: `[ ]` not started · `[x]` completed · `[~]` in progress. Update only when there is evidence.
 
-- [ ] **Task 1 — Repository reconnaissance and plan validation**
+- [x] **Task 1 — Repository reconnaissance and plan validation**
   - Inspect only the relevant source/config/test paths.
-  - Identify actual cache reads/writes, Upstox fetch, cache key, pickle schema, multi-day call path, and test commands.
-  - Record findings in `docs/ARCHITECTURE.md` and `docs/DATA_AND_CACHE.md`.
+  - Identified actual cache reads/writes, Upstox fetch, cache key, pickle schema, multi-day call path, and test commands.
+  - Recorded findings in `docs/ARCHITECTURE.md` and `docs/DATA_AND_CACHE.md`.
   - No application code changes.
 
 - [ ] **Task 2 — R2 adapter**
@@ -47,7 +47,7 @@ Status key: `[ ]` not started · `[x]` completed · `[~]` in progress. Update on
   - Decide separately what to do with `backtest_results/`; do not migrate it blindly.
 
 ## Current task
-Task 1 — Repository reconnaissance and plan validation.
+Task 2 — R2 adapter
 
 ## Rule
 Complete one task at a time. Before each task, state intended changes and acceptance criteria; after it, report actual changed files and test evidence, then wait for approval.

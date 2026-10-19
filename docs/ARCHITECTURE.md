@@ -11,8 +11,8 @@ This is a high-level map based on prior project discussions. It is intentionally
    - For backtest modes, runs backend workers and shows results/history.
 
 2. **Backtest orchestration**
-   - Single-day backtest: `ui.py` → `run_backtest_worker` → `backtest.backtest.start_backtest` → `Backtester.prepare_day` → loads historical data and runs strategy.
-   - Multi-day backtest: `ui.py` → `run_multiday_worker` → `Backtester.run_date_range` → loops through dates, calling `prepare_day` for each date.
+   - Single-day backtest: `ui.py` → `run_backtest_worker` → `backtest.backtest.start_backtest` → `Backtester.prepare_day` → returns (`strategy`, `historical`) where `historical` is a dict mapping `instrument_key` → list of `Candle` objects; then runs strategy via `strategy.run_backtest(historical)`.
+   - Multi-day backtest: `ui.py` → `run_multiday_worker` → `Backtester.run_date_range` → loops through dates, calling `prepare_day` for each date and accumulating `DayResult` objects.
    - Uses event bus (`models/events.py`) for progress updates to UI.
 
 3. **Strategy/backtesting engine** (`strategy.py`)
@@ -22,9 +22,9 @@ This is a high-level map based on prior project discussions. It is intentionally
 
 4. **Market-data access**
    - Core caching in `services/historical_service.py`: `get_historical_candles`.
-   - Cache key: per-date pickle file `historical_cache/YYYY-MM-DD.pkl` containing a dict `{instrument_key: list of Candle objects}`.
+   - Cache key: per-date (or per date range) pickle file `historical_cache/{from_date}_{to_date}.pkl` when `from_date != to_date`, otherwise `historical_cache/{from_date}.pkl`; each file contains a dict mapping `instrument_key` → list of `Candle` objects.
    - On cache miss, calls `services/upstox_service.get_expired_historical_candles` (Upstox SDK).
-   - `backtest/historical_market_data.load_historical_market_data` orchestrates fetching for all contracts for a date.
+   - `backtest/historical_market_data.load_historical_market_data` orchestrates fetching for all contracts for a date (or date range) by calling `get_historical_candles` per instrument.
 
 5. **Local historical cache**
    - Directory: `historical_cache/` (gitignored).
