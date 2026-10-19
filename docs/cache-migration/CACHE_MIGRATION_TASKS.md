@@ -18,7 +18,7 @@ Status key: `[ ]` not started · `[x]` completed · `[~]` in progress. Update on
   - Preserve current cache interface and file compatibility.
   - Unit tests for local hit, R2 hit, full miss, and persistence.
 
-- [ ] **Task 4 — Multi-day efficiency and reliability**
+- [x] **Task 4 — Multi-day efficiency and reliability**
   - Test that repeated access does not repeat downloads/deserialization unnecessarily.
   - Bound local cache usage.
   - Address concurrent same-key misses, partial downloads, retries/timeouts, and clear failure behavior.
@@ -47,7 +47,7 @@ Status key: `[ ]` not started · `[x]` completed · `[~]` in progress. Update on
   - Decide separately what to do with `backtest_results/`; do not migrate it blindly.
 
 ## Current task
-Task 4 — Multi-day efficiency and reliability
+Task 5 — Resumable migration utility
 
 ## Rule
 Complete one task at a time. Before each task, state intended changes and acceptance criteria; after it, report actual changed files and test evidence, then wait for approval.

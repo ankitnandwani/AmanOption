@@ -13,6 +13,7 @@ os.environ["R2_BUCKET_NAME"] = "test-bucket"
 
 from services.historical_service import get_historical_candles
 from services.r2_service import _s3_client as r2_s3_client
+from services.historical_service import _memory_cache, _pending_fetches
 from models.models import Candle
 from datetime import datetime
 
@@ -22,8 +23,10 @@ class TestHistoricalService(unittest.TestCase):
         # Reset R2 service singleton client before each test
         global r2_s3_client
         r2_s3_client = None
+        # Clear global state before each test
+        _memory_cache.clear()
+        _pending_fetches.clear()
         print(f"[SETUP] Reset r2_s3_client to {r2_s3_client}")
-    def setUp(self):
         # Sample candle data for testing
         self.sample_candle_data = [
             (

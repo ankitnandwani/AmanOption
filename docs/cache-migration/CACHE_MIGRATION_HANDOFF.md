@@ -7,10 +7,10 @@ AmanOptions — https://github.com/ankitnandwani/AmanOption
 Context and migration-planning documents have been validated against a fresh checkout of the repository. Actual cache reads/writes, Upstox fetch, cache key, pickle schema, multi-day call path, and test commands have been identified and documented.
 
 ## Current task
-Task 3 — Cache integration: Completed.
+Task 5 — Resumable migration utility
 
 ## Next agent instructions
-Proceed to Task 4 — Multi-day efficiency and reliability: Test that repeated access does not repeat downloads/deserialization unnecessarily.
+Work on Task 5 — Resumable migration utility: Upload local cache files while preserving current key layout.
 
 ## Changed files
 - Updated `docs/ARCHITECTURE.md` with actual cache behavior, backup orchestrator details, and market-data access specifics.
