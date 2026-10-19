@@ -13,7 +13,7 @@ Status key: `[ ]` not started · `[x]` completed · `[~]` in progress. Update on
   - Unit tests use mocks; no live credentials required.
   - Credentials supplied via environment variables; no secrets in code.
 
-- [ ] **Task 3 — Cache integration**
+- [x] **Task 3 — Cache integration**
   - Add local-cache → R2 → existing Upstox fallback.
   - Preserve current cache interface and file compatibility.
   - Unit tests for local hit, R2 hit, full miss, and persistence.
@@ -47,7 +47,7 @@ Status key: `[ ]` not started · `[x]` completed · `[~]` in progress. Update on
   - Decide separately what to do with `backtest_results/`; do not migrate it blindly.
 
 ## Current task
-Task 3 — Cache integration
+Task 4 — Multi-day efficiency and reliability
 
 ## Rule
 Complete one task at a time. Before each task, state intended changes and acceptance criteria; after it, report actual changed files and test evidence, then wait for approval.

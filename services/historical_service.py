@@ -1,15 +1,20 @@
 from datetime import datetime
 import pickle
 from pathlib import Path
+import os
 
 import requests
 
 from models.config import BASE_URL_V3
 from models.models import Candle
 from services.upstox_service import get_expired_historical_candles
+from services.r2_service import get_object, object_exists, put_object
 
 CACHE_DIR = Path("historical_cache")
 CACHE_DIR.mkdir(exist_ok=True)
+
+# R2 bucket name from environment variable
+R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME", "amanoptions-historical-cache")
 
 def get_historical_candles(
     access_token: str,
@@ -25,21 +30,63 @@ def get_historical_candles(
     # The cache file name is based on the from_date and to_date (they are typically the same day in backtests).
     day_key = f"{from_date}_{to_date}" if from_date != to_date else from_date
     cache_file = CACHE_DIR / f"{day_key}.pkl"
+    r2_key = f"historical_cache/{day_key}.pkl"
 
-    # Load existing day cache (a dict mapping instrument_key → list of Candle objects)
+    # First, try to load from local cache
     day_cache = {}
+    local_cache_hit = False
     if cache_file.exists():
         try:
             with open(cache_file, "rb") as f:
                 day_cache = pickle.load(f) or {}
+            local_cache_hit = True
         except Exception as e:
             print(f"Error reading cache file {cache_file}: {e}")
             day_cache = {}
 
-    # Return cached data if we already have candles for this instrument on this day
-    if instrument_key in day_cache:
+    # Return cached data if we already have candles for this instrument on this day (local cache hit)
+    if local_cache_hit and instrument_key in day_cache:
         return day_cache[instrument_key]
 
+    # If not in local cache, check R2
+    if not local_cache_hit or instrument_key not in day_cache:
+        # Try to get the cache file from R2
+        r2_data = get_object(R2_BUCKET_NAME, r2_key)
+        if r2_data is not None:
+            try:
+                r2_cache = pickle.loads(r2_data) or {}
+                # If we have data for this instrument in R2, use it
+                if instrument_key in r2_cache:
+                    # Optionally store in local cache for future requests (but don't overwrite if we had a partial local cache)
+                    if not local_cache_hit:
+                        day_cache = r2_cache
+                    elif instrument_key not in day_cache:
+                        day_cache[instrument_key] = r2_cache[instrument_key]
+                    # Save to local cache
+                    try:
+                        with open(cache_file, "wb") as f:
+                            pickle.dump(day_cache, f)
+                    except Exception as e:
+                        print(f"Error saving day cache file {cache_file}: {e}")
+                    return r2_cache[instrument_key]
+                # If not in R2 cache, we'll fall through to Upstox
+                else:
+                    # Still store the R2 data locally for potential future use
+                    if not local_cache_hit:
+                        day_cache = r2_cache
+                    elif not day_cache:  # Only if we don't have any local data yet
+                        day_cache = r2_cache
+                    # Save the R2 data locally
+                    try:
+                        with open(cache_file, "wb") as f:
+                            pickle.dump(day_cache, f)
+                    except Exception as e:
+                        print(f"Error saving day cache file {cache_file}: {e}")
+            except Exception as e:
+                print(f"Error processing R2 data for {r2_key}: {e}")
+                # Continue to Upstox fetch
+
+    # If we get here, we need to fetch from Upstox (local miss and R2 miss or error)
     print(f"CACHE MISS: Fetching {instrument_key} from API for {day_key}...")
     response = get_expired_historical_candles(
         access_token,
@@ -122,11 +169,15 @@ def get_historical_candles(
 
     result = list(reversed(candles))
 
-    # Update the per‑day cache dict and persist it, even if the result is empty.
+    # Update the per‑day cache dict and persist it to both local cache and R2
     day_cache[instrument_key] = result
     try:
+        # Save to local cache
         with open(cache_file, "wb") as f:
             pickle.dump(day_cache, f)
+        # Save to R2
+        pickle_data = pickle.dumps(day_cache)
+        put_object(R2_BUCKET_NAME, r2_key, pickle_data)
     except Exception as e:
         print(f"Error saving day cache file {cache_file}: {e}")
 
