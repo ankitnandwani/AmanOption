@@ -8,7 +8,7 @@ Status key: `[ ]` not started · `[x]` completed · `[~]` in progress. Update on
   - Recorded findings in `docs/ARCHITECTURE.md` and `docs/DATA_AND_CACHE.md`.
   - No application code changes.
 
-- [ ] **Task 2 — R2 adapter**
+- [x] **Task 2 — R2 adapter**
   - Add minimal object existence/get/put operations using the project's dependency conventions.
   - Unit tests use mocks; no live credentials required.
   - Credentials supplied via environment variables; no secrets in code.
@@ -47,7 +47,7 @@ Status key: `[ ]` not started · `[x]` completed · `[~]` in progress. Update on
   - Decide separately what to do with `backtest_results/`; do not migrate it blindly.
 
 ## Current task
-Task 2 — R2 adapter
+Task 3 — Cache integration
 
 ## Rule
 Complete one task at a time. Before each task, state intended changes and acceptance criteria; after it, report actual changed files and test evidence, then wait for approval.
