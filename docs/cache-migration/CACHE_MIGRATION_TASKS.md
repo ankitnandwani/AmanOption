@@ -24,7 +24,7 @@ Status key: `[ ]` not started · `[x]` completed · `[~]` in progress. Update on
   - Address concurrent same-key misses, partial downloads, retries/timeouts, and clear failure behavior.
   - Add limited concurrency/prefetch only if justified.
 
-- [ ] **Task 5 — Resumable migration utility**
+- [~] **Task 5 — Resumable migration utility**
   - Upload local cache files while preserving current key layout.
   - Support resume/retry and dry-run/listing.
   - Verify object count, bytes, and checksums where feasible.
@@ -47,7 +47,7 @@ Status key: `[ ]` not started · `[x]` completed · `[~]` in progress. Update on
   - Decide separately what to do with `backtest_results/`; do not migrate it blindly.
 
 ## Current task
-Task 5 — Resumable migration utility
+Task 5 — Resumable migration utility (in progress)
 
 ## Rule
 Complete one task at a time. Before each task, state intended changes and acceptance criteria; after it, report actual changed files and test evidence, then wait for approval.
