@@ -1,5 +1,7 @@
 import os
 import pickle
+import shutil
+import tempfile
 import unittest
 from unittest.mock import patch, MagicMock, mock_open
 from pathlib import Path
@@ -14,6 +16,7 @@ os.environ["R2_BUCKET_NAME"] = "test-bucket"
 from services.historical_service import get_historical_candles
 from services.r2_service import _s3_client as r2_s3_client
 from services.historical_service import _memory_cache, _pending_fetches
+import services.historical_service as historical_service
 from models.models import Candle
 from datetime import datetime
 
@@ -27,6 +30,19 @@ class TestHistoricalService(unittest.TestCase):
         _memory_cache.clear()
         _pending_fetches.clear()
         print(f"[SETUP] Reset r2_s3_client to {r2_s3_client}")
+
+        # Isolate the cache directory for the duration of the test.
+        # get_historical_candles() calls _enforce_cache_size_limit(), which operates on
+        # the real historical_cache/ directory when CACHE_DIR is not redirected. Because
+        # other test modules set MAX_CACHE_SIZE_MB=1 before this module is imported, the
+        # eviction helper would delete the real cache files. Point CACHE_DIR at a
+        # temporary directory and disable eviction so tests never touch real data.
+        self._original_cache_dir = historical_service.CACHE_DIR
+        self._original_max_cache_size_bytes = historical_service.MAX_CACHE_SIZE_BYTES
+        self._temp_cache_dir = tempfile.mkdtemp(prefix="amanoptions_test_cache_")
+        historical_service.CACHE_DIR = Path(self._temp_cache_dir)
+        historical_service.MAX_CACHE_SIZE_BYTES = 1024 * 1024 * 1024  # 1 GiB: no eviction
+
         # Sample candle data for testing
         self.sample_candle_data = [
             (
@@ -51,6 +67,12 @@ class TestHistoricalService(unittest.TestCase):
             )
             for row in self.sample_candle_data
         ]
+
+    def tearDown(self):
+        # Restore the real cache directory and size limit
+        historical_service.CACHE_DIR = self._original_cache_dir
+        historical_service.MAX_CACHE_SIZE_BYTES = self._original_max_cache_size_bytes
+        shutil.rmtree(self._temp_cache_dir, ignore_errors=True)
 
     @patch("services.historical_service.Path.exists")
     @patch("builtins.open", new_callable=mock_open)

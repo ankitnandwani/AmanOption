@@ -27,12 +27,19 @@ This is a high-level map based on prior project discussions. It is intentionally
    - `backtest/historical_market_data.load_historical_market_data` orchestrates fetching for all contracts for a date (or date range) by calling `get_historical_candles` per instrument.
 
 5. **Local historical cache**
-   - Directory: `historical_cache/` (gitignored).
-   - Approximately 962 `.pkl` files (one per trading day) totalling ~3.14 GB.
-   - Each file pickles a dict mapping instrument_key → list of `Candle` objects (from `models/models.py`).
+   - Directory: `historical_cache/` (git-ignored).
+   - One `.pkl` file per calendar date, each holding ~211 instrument keys mapped to lists of
+     `Candle` objects (from `models/models.py`); the full dataset is ~3 GB.
+   - Bounded by `MAX_CACHE_SIZE_MB`: `_enforce_cache_size_limit()` deletes the least recently
+     written files when the directory exceeds the limit. The limit is resolved once at import
+     time: unlimited by default outside Render, 500 MB on Render (`RENDER=true`), `0`/negative
+     meaning unlimited, an explicit value being honoured as-is. This runs against the real
+     directory, so tests must redirect `CACHE_DIR` to a temporary path.
+   - Eviction is throttled to at most one directory scan every 5 seconds, and the most recently
+     written file is never evicted.
 
 6. **Backtest results / artifacts**
-   - Directory: `backtest_results/` (gitignored).
+   - Directory: `backtest_results/` (git-ignored).
    - Stores per-job JSON results (`backtest_results/<job_id>.json`) and status files (`.status`).
    - Contains aggregated backtest outcomes (total P&L, win rate, daily P&L, etc.) for display in UI history.
 
@@ -40,6 +47,26 @@ This is a high-level map based on prior project discussions. It is intentionally
    - Deployed on Render Free Web Service.
    - Local filesystem treated as ephemeral; not durable across redeploys.
    - External cache (e.g., Cloudflare R2) needed for shared persistence across users.
+
+8. **Cache key layout (`services/cache_keys.py`)**
+   - Single source of truth for both the local file name and the R2 object key, shared by
+     `services/historical_service.py` and `migrate_cache_to_r2.py`.
+   - Local file: `historical_cache/{day_key}.pkl`; R2 object key: `historical_cache/{day_key}.pkl`.
+   - Bucket: `R2_BUCKET_NAME` (default `amanoptions-historical-cache`).
+   - Credentials: `R2_ENDPOINT`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`.
+
+9. **R2 storage adapter (`services/r2_service.py`)**
+   - `get_client()`, `object_exists()`, `get_object()`, `put_object()` (optional `metadata`),
+     `put_file()` (managed streaming upload), `head_object()`, `list_objects()` (paginated).
+   - The client is configured with `request_checksum_calculation="when_required"`: recent
+     botocore versions attach a CRC32 `ChecksumAlgorithm` to every `PutObject` by default,
+     which Cloudflare R2 does not reliably accept.
+
+10. **Migration utility (`migrate_cache_to_r2.py`)**
+    - Modes: `--list`, `--dry-run`, `--upload` (default), `--verify`.
+    - Resumable through `migration_state.json` (git-ignored); retries with exponential backoff.
+    - Stores MD5/SHA-256 as object metadata so verification does not depend on the ETag.
+    - Never modifies or deletes the local cache files.
 
 ## Target cache architecture under consideration
 

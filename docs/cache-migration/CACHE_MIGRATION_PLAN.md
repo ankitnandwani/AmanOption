@@ -53,3 +53,17 @@ For each required cache key:
 - R2 or provider errors are handled explicitly and safely.
 - Representative backtest results match the pre-migration baseline.
 - No secrets or large data files are committed.
+
+## Execution status (2026-11-12)
+
+Task 6 uploaded and verified 1,013 pickle files totaling 3,340,758,071 bytes in R2. Live hits,
+miss persistence and reuse, and two multi-day backtest comparisons passed. Task 7
+passed its local startup and targeted test checks and verified the Render service.
+The settled 1,029-file cache snapshot was reconciled with R2 and all checksums matched.
+Render is live on `898e082` with the corrected account-level endpoint.
+The November 2–3 run matched the local baseline, and the October 8 run
+filled all missing contracts in R2. Task 8 confirmed the app was reachable and
+that all 1,029 local cache keys were present in R2. The cutover retains local
+originals and keeps backtest history on the current filesystem. See the
+[task tracker](CACHE_MIGRATION_TASKS.md) and
+[handoff](CACHE_MIGRATION_HANDOFF.md).

@@ -1,0 +1,10 @@
+# Python build/cache artifacts
+__pycache__/
+*.py[cod]
+.venv/
+
+# macOS
+.DS_Store
+
+# Local migration progress state (resumable cache upload to R2)
+migration_state.json

@@ -3,6 +3,7 @@ import pickle
 from pathlib import Path
 import os
 import threading
+import time
 from collections import OrderedDict
 
 import requests
@@ -11,6 +12,7 @@ from models.config import BASE_URL_V3
 from models.models import Candle
 from services.upstox_service import get_expired_historical_candles
 from services.r2_service import get_object, object_exists, put_object
+from services.cache_keys import R2_KEY_PREFIX, cache_file_name
 
 CACHE_DIR = Path("historical_cache")
 CACHE_DIR.mkdir(exist_ok=True)
@@ -18,9 +20,53 @@ CACHE_DIR.mkdir(exist_ok=True)
 # R2 bucket name from environment variable
 R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME", "amanoptions-historical-cache")
 
-# Bounded local cache settings
-MAX_CACHE_SIZE_MB = int(os.getenv("MAX_CACHE_SIZE_MB", "500"))  # Default 500MB
+# Bounded local cache settings.
+#
+# MAX_CACHE_SIZE_MB controls how much disk the local cache may occupy:
+#   * greater than 0 : once the cache is larger than this many megabytes, the
+#                       least recently written cache files are deleted to bring
+#                       it back under the limit.
+#   * 0 or negative   : unlimited. No cache file is ever deleted.
+#
+# When the variable is not set, the default is 500 MB on Render (its filesystem
+# is ephemeral and must stay bounded) and unlimited everywhere else, so a local
+# development machine never silently deletes market data that was just
+# downloaded. Set MAX_CACHE_SIZE_MB explicitly to override either way.
+DEFAULT_RENDER_CACHE_SIZE_MB = 500
+
+
+def _resolve_max_cache_size_mb() -> int:
+    """Resolve the local cache size limit in megabytes (0 means unlimited)."""
+    raw = os.getenv("MAX_CACHE_SIZE_MB")
+    if raw is not None and raw.strip() != "":
+        try:
+            return int(raw)
+        except ValueError:
+            print(f"Warning: ignoring invalid MAX_CACHE_SIZE_MB={raw!r}")
+    # Render sets RENDER=true for every service (build time and runtime).
+    if os.getenv("RENDER", "").strip().lower() == "true":
+        return DEFAULT_RENDER_CACHE_SIZE_MB
+    return 0
+
+
+MAX_CACHE_SIZE_MB = _resolve_max_cache_size_mb()
 MAX_CACHE_SIZE_BYTES = MAX_CACHE_SIZE_MB * 1024 * 1024
+CACHE_EVICTION_ENABLED = MAX_CACHE_SIZE_BYTES > 0
+
+# Eviction runs after every contract write. A full directory scan per write is
+# expensive, so scans are throttled and the running size estimate lets the
+# common case skip the scan entirely.
+_ENFORCE_INTERVAL_SECONDS = 5.0
+_last_enforcement_time = 0.0
+_cache_size_estimate = 0
+
+if CACHE_EVICTION_ENABLED:
+    print(
+        f"Local cache limit: {MAX_CACHE_SIZE_MB} MB "
+        f"(cache files are deleted when the limit is exceeded)"
+    )
+else:
+    print("Local cache: unlimited size (no cache file will be deleted)")
 
 # In-memory cache for recently accessed items to avoid repeated deserialization
 # Using OrderedDict for LRU-like behavior
@@ -35,36 +81,88 @@ _pending_fetches = {}
 _pending_fetches_lock = threading.Lock()
 
 
-def _enforce_cache_size_limit():
-    """Enforce the local cache size limit by removing oldest files when needed."""
+def _write_cache_file(cache_file: Path, payload) -> None:
+    """Write the day cache to disk and keep the size estimate in sync."""
+    global _cache_size_estimate
     try:
-        # Get all cache files with their access times
+        previous_size = cache_file.stat().st_size
+    except OSError:
+        previous_size = 0
+    with open(cache_file, "wb") as f:
+        pickle.dump(payload, f)
+    try:
+        _cache_size_estimate += cache_file.stat().st_size - previous_size
+    except OSError:
+        pass
+
+
+def _enforce_cache_size_limit(force: bool = False) -> None:
+    """Evict the least recently written cache files to stay within the size limit.
+
+    This is a no-op when the limit is disabled (MAX_CACHE_SIZE_MB <= 0), which is
+    the default outside Render: a development machine must never silently delete
+    market data that was just downloaded.
+    """
+    global _last_enforcement_time, _cache_size_estimate
+
+    if not CACHE_EVICTION_ENABLED:
+        return
+
+    now = time.monotonic()
+    if not force and (now - _last_enforcement_time) < _ENFORCE_INTERVAL_SECONDS:
+        # A scan is due shortly. Only scan early when the cache is already over
+        # the limit, so the size stays bounded.
+        if _cache_size_estimate < MAX_CACHE_SIZE_BYTES:
+            return
+
+    _last_enforcement_time = now
+
+    try:
+        # Collect cache files with their size and last write time
         cache_files = []
         for cache_file in CACHE_DIR.glob("*.pkl"):
             try:
-                access_time = os.path.getatime(cache_file)
-                file_size = os.path.getsize(cache_file)
-                cache_files.append((cache_file, access_time, file_size))
+                stat = cache_file.stat()
+                cache_files.append((cache_file, stat.st_mtime, stat.st_size))
             except OSError:
                 # Skip files that can't be accessed
                 continue
-        
-        # Sort by access time (oldest first)
-        cache_files.sort(key=lambda x: x[1])
-        
+
+        # Least recently written first. Modification time is used rather than
+        # access time because access times are unreliable across filesystems and
+        # are frequently not updated at all.
+        cache_files.sort(key=lambda item: (item[1], item[0].name))
+
         # Calculate total size
         total_size = sum(size for _, _, size in cache_files)
-        
-        # Remove oldest files until we're under the limit
-        while total_size > MAX_CACHE_SIZE_BYTES and cache_files:
+
+        evicted = 0
+        freed_bytes = 0
+
+        # Remove oldest files until we're under the limit. The most recently
+        # written file is never removed: it is the work that was just done and
+        # the one most likely to still be needed.
+        while total_size > MAX_CACHE_SIZE_BYTES and len(cache_files) > 1:
             oldest_file, _, file_size = cache_files.pop(0)
             try:
                 os.remove(oldest_file)
                 total_size -= file_size
-                print(f"Evicted cache file {oldest_file.name} to stay within size limit")
+                freed_bytes += file_size
+                evicted += 1
             except OSError as e:
                 print(f"Error removing cache file {oldest_file.name}: {e}")
-                
+
+        _cache_size_estimate = total_size
+
+        if evicted:
+            limit_mb = MAX_CACHE_SIZE_BYTES / (1024 * 1024)
+            print(
+                f"Evicted {evicted} cache file(s), freed "
+                f"{freed_bytes / (1024 * 1024):.1f} MB to stay within the "
+                f"{limit_mb:.0f} MB local cache limit "
+                f"(now {total_size / (1024 * 1024):.1f} MB)"
+            )
+
     except Exception as e:
         print(f"Error enforcing cache size limit: {e}")
 
@@ -97,7 +195,11 @@ def get_cache_stats():
             "total_size_bytes": total_size,
             "total_size_mb": total_size / (1024 * 1024),
             "max_cache_size_mb": MAX_CACHE_SIZE_MB,
-            "cache_usage_ratio": total_size / MAX_CACHE_SIZE_BYTES if MAX_CACHE_SIZE_BYTES > 0 else 0,
+            # 0 means unlimited: no cache file is ever deleted.
+            "cache_eviction_enabled": CACHE_EVICTION_ENABLED,
+            "cache_usage_ratio": (
+                total_size / MAX_CACHE_SIZE_BYTES if MAX_CACHE_SIZE_BYTES > 0 else None
+            ),
             "memory_cache_items": memory_cache_size,
             "max_memory_cache_items": _MAX_MEMORY_CACHE_ITEMS,
             "oldest_file_access": min(access_times) if access_times else None,
@@ -121,8 +223,8 @@ def get_historical_candles(
     # Cache per day (or per date range). Store all contracts for a given day in a single cache file.
     # The cache file name is based on the from_date and to_date (they are typically the same day in backtests).
     day_key = f"{from_date}_{to_date}" if from_date != to_date else from_date
-    cache_file = CACHE_DIR / f"{day_key}.pkl"
-    r2_key = f"historical_cache/{day_key}.pkl"
+    cache_file = CACHE_DIR / cache_file_name(day_key)
+    r2_key = f"{R2_KEY_PREFIX}/{cache_file_name(day_key)}"
     cache_key = f"{day_key}:{instrument_key}"  # Unique key for this instrument/date combination
 
     # Check in-memory cache first to avoid repeated deserialization
@@ -196,8 +298,7 @@ def get_historical_candles(
                             day_cache[instrument_key] = r2_cache[instrument_key]
                         # Save to local cache
                         try:
-                            with open(cache_file, "wb") as f:
-                                pickle.dump(day_cache, f)
+                            _write_cache_file(cache_file, day_cache)
                         except Exception as e:
                             print(f"Error saving day cache file {cache_file}: {e}")
                         
@@ -218,8 +319,7 @@ def get_historical_candles(
                             day_cache = r2_cache
                         # Save the R2 data locally
                         try:
-                            with open(cache_file, "wb") as f:
-                                pickle.dump(day_cache, f)
+                            _write_cache_file(cache_file, day_cache)
                         except Exception as e:
                             print(f"Error saving day cache file {cache_file}: {e}")
                 except Exception as e:
@@ -313,13 +413,13 @@ def get_historical_candles(
         day_cache[instrument_key] = result
         try:
             # Save to local cache
-            with open(cache_file, "wb") as f:
-                pickle.dump(day_cache, f)
+            _write_cache_file(cache_file, day_cache)
             # Save to R2
             pickle_data = pickle.dumps(day_cache)
             put_object(R2_BUCKET_NAME, r2_key, pickle_data)
-            
-            # Enforce bounded local cache size (evict oldest files if needed)
+
+            # Enforce bounded local cache size (evict oldest files if needed).
+            # No-op when the limit is disabled, which is the default locally.
             _enforce_cache_size_limit()
         except Exception as e:
             print(f"Error saving day cache file {cache_file}: {e}")
