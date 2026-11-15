@@ -3,12 +3,14 @@
 Use `[ ]` for pending, `[~]` for in progress, and `[x]` for complete. Record evidence
 in the handoff and stop for review after each task.
 
-- [ ] **Task 1 — Persist completed reports**
+- [x] **Task 1 — Persist completed reports**
   - Implement the versioned JSON report and private R2 storage service. Wire it into
     the existing multi-day completion path behind the feature flag. Preserve local
     output, result rendering, and failure reporting.
   - Test field allowlisting, legacy local JSON, independent IDs for simultaneous
     jobs, retry of the same key, and successful result delivery when upload fails.
+  - 57 targeted tests passed. A two-client NiceGUI check verified completion
+    isolation, rendering after an upload failure, and the legacy history reader.
 - [ ] **Task 2 — Read cloud history in the UI**
   - Extend the existing View History button with newest-first pages and lazy report
     details. Reuse the current summary and daily P&L renderer.
@@ -23,5 +25,5 @@ in the handoff and stop for review after each task.
     result from a fresh browser, and verify it survives a restart or redeploy.
     Compare displayed daily and total P&L and record rollback steps.
 
-Next task when implementation is requested: **Task 1**. Existing-report import
+Next task when implementation is requested: **Task 2**. Existing-report import
 is outside these tasks and requires a separate scope and review.

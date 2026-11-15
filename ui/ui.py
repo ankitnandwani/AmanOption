@@ -2,7 +2,7 @@ import os
 import threading
 import traceback
 import json
-from datetime import date, datetime
+from datetime import date
 from queue import Queue
 from threading import Thread
 from pathlib import Path
@@ -15,6 +15,7 @@ from models.config import UPSTOX_ACCESS_TOKEN
 from backtest.bootstrap import start_live
 from backtest.backtest import start_backtest
 from models.models import StrategyConfig
+from services.backtest_report_service import new_job_id, save_completed_report
 
 strategy = None
 websocket = None
@@ -23,23 +24,6 @@ multi_result_queue = Queue()
 
 RESULTS_DIR = Path("backtest_results")
 RESULTS_DIR.mkdir(exist_ok=True)
-
-def save_backtest_result(job_id, result):
-    result_data = {
-        "total_days": result.total_days,
-        "profitable_days": result.profitable_days,
-        "losing_days": result.losing_days,
-        "win_rate": result.win_rate,
-        "total_pnl": result.total_pnl,
-        "average_pnl": result.average_pnl,
-        "best_day": {"date": result.best_day.date, "pnl": result.best_day.pnl} if result.best_day else None,
-        "worst_day": {"date": result.worst_day.date, "pnl": result.worst_day.pnl} if result.worst_day else None,
-        "days": [{"date": day.date, "pnl": day.pnl} for day in result.days],
-    }
-    with open(RESULTS_DIR / f"{job_id}.json", "w") as f:
-        json.dump(result_data, f)
-    with open(RESULTS_DIR / f"{job_id}.status", "w") as f:
-        f.write("completed")
 
 def set_job_status(job_id, status):
     with open(RESULTS_DIR / f"{job_id}.status", "w") as f:
@@ -170,7 +154,7 @@ def start():
         ).start()
         return
     elif mode.value == "multiDayBacktest":
-        job_id = f"job_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        job_id = new_job_id()
         Thread(
             target=run_multiday_worker,
             args=(
@@ -278,9 +262,10 @@ def run_multiday_worker(
             end_date=end_date,
         )
 
-        save_backtest_result(job_id, result)
+        cloud_saved = save_completed_report(RESULTS_DIR, job_id, result, start_date, end_date)
+        set_job_status(job_id, "completed")
         multi_result_queue.put(
-            ("success", result)
+            ("success", (result, cloud_saved))
         )
 
     except Exception as e:
@@ -314,7 +299,10 @@ def check_multiday_finished():
         type="positive",
     )
 
-    render_multiday_results(value)
+    result, cloud_saved = value
+    render_multiday_results(result)
+    if cloud_saved is False:
+        ui.notify("The report was saved locally. Cloud history is unavailable for this run.", type="warning")
 
 def update_mode():
     replay_container.set_visibility(

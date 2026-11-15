@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 _s3_client = None
 
 
-def _build_client_config() -> Config:
+def _build_client_config(**options) -> Config:
     """Build the botocore configuration used for the R2 client.
 
     Recent botocore versions attach a CRC32 checksum to every PutObject request by
@@ -22,29 +22,33 @@ def _build_client_config() -> Config:
     genuinely requires it.
     """
     try:
-        return Config(request_checksum_calculation="when_required")
+        return Config(request_checksum_calculation="when_required", **options)
     except TypeError:  # pragma: no cover - older botocore without the option
-        return Config()
+        return Config(**options)
+
+
+def create_client(**options):
+    endpoint_url = os.getenv("R2_ENDPOINT")
+    access_key_id = os.getenv("R2_ACCESS_KEY_ID")
+    secret_access_key = os.getenv("R2_SECRET_ACCESS_KEY")
+    if not endpoint_url or not access_key_id or not secret_access_key:
+        logger.warning(
+            "R2 credentials not fully set; R2 service will be disabled"
+        )
+        return None
+    return boto3.client(
+        "s3",
+        endpoint_url=endpoint_url,
+        aws_access_key_id=access_key_id,
+        aws_secret_access_key=secret_access_key,
+        config=_build_client_config(**options),
+    )
 
 
 def get_client():
     global _s3_client
     if _s3_client is None:
-        endpoint_url = os.getenv("R2_ENDPOINT")
-        access_key_id = os.getenv("R2_ACCESS_KEY_ID")
-        secret_access_key = os.getenv("R2_SECRET_ACCESS_KEY")
-        if not endpoint_url or not access_key_id or not secret_access_key:
-            logger.warning(
-                "R2 credentials not fully set; R2 service will be disabled"
-            )
-            return None
-        _s3_client = boto3.client(
-            "s3",
-            endpoint_url=endpoint_url,
-            aws_access_key_id=access_key_id,
-            aws_secret_access_key=secret_access_key,
-            config=_build_client_config(),
-        )
+        _s3_client = create_client()
     return _s3_client
 
 

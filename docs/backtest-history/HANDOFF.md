@@ -2,14 +2,39 @@
 
 ## Status
 
-Planning is complete. The owner confirmed multi-day backtests run on Render and
-requested durable reports and a way for visitors to browse prior results.
-Implementation starts with [Task 1](TASKS.md). The [plan](PLAN.md) defines the
-storage contract, visibility proposal, and acceptance checks.
+Task 1 is complete and ready for review. The owner confirmed Cloudflare R2 as
+the provider for report storage. [Task 2](TASKS.md) covers browsing saved
+reports. Keep production enablement for Task 3.
+
+## Task 1 implementation
+
+- `services/backtest_report_service.py` writes the existing local JSON shape
+  atomically. With `BACKTEST_CLOUD_HISTORY=true` and an explicit
+  `R2_BUCKET_NAME`, it also writes version 1 JSON to
+  `backtest_results/v1/<18-digit reverse UTC microseconds>_<job_id>.json`.
+  The timestamp is the number of microseconds from completion to UTC
+  `datetime.max`. The job ID combines a UTC timestamp with a UUID.
+- The envelope contains `schema_version`, `job_id`, `completed_at`,
+  `start_date`, `end_date`, and `result`. Only the legacy summary and daily P&L
+  fields populate `result`. Strategy configuration is outside the envelope.
+- `services/r2_service.py` exposes the existing client construction so the
+  report PUT can use 3-second connect and 5-second read timeouts and two SDK
+  attempts with the same key and body. Market-data callers keep their existing
+  singleton and settings.
+- `ui/ui.py` saves from the multi-day worker. The completed result and status
+  survive a failed upload, and the UI displays a separate warning. The legacy
+  history reader still displays local reports. No live R2 writes or Render
+  deployment were performed during Task 1.
+- All 57 targeted tests passed in an isolated working directory. This includes
+  five new report tests and a transport stub that exercises the real botocore
+  retry handler. A separate in-process check built two NiceGUI client contexts,
+  verified distinct completion queues, and confirmed local history and result
+  rendering after a simulated cloud failure. The six known cache test-harness
+  failures were outside this run.
 
 ## Verified starting points
 
-- `ui/ui.py` contains `save_backtest_result`, `run_multiday_worker`,
+- `ui/ui.py` contains `run_multiday_worker`,
   `load_backtest_results`, `show_history`, and `render_multiday_results`.
   The existing history reads all local JSON files and their status companions
   when opened. `models/backtest_result.py` defines the result model.
@@ -32,7 +57,8 @@ storage contract, visibility proposal, and acceptance checks.
 ## Next agent
 
 Read `AGENTS.md`, the context docs, and the backtest history plan and tracker.
-Check Git status. Implement Task 1 with mocked R2 and temporary results paths,
-then record actual changes and test results here and stop for review. Use the
-project's `unittest` workflow. The planning pass added documentation only and
-validated its relative links and whitespace.
+Check Git status. Implement Task 2 with mocked R2 and temporary results paths.
+Use the existing feature flag, fetch one history page at a time, and load and
+validate report details on selection. Preserve the local history path and add
+the shared-history disclosure before production enablement. Record actual
+changes and `unittest` results here and stop for review.

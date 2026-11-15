@@ -51,8 +51,8 @@ on the Upstox API for any day already stored.
   modifies or deletes the local files.
 
 ## Current task
-Cloud backtest history is planned as a separate feature. Start with Task 1 in its
-[tracker](docs/backtest-history/TASKS.md) when implementation is requested.
+Cloud backtest history is a separate feature. Task 1 report persistence is complete.
+Task 2 is cloud history in the UI. See its [tracker](docs/backtest-history/TASKS.md).
 
 The cache migration and Task 8 cutover review are complete. R2 is the shared
 historical cache. Keep the local originals and staged recovery snapshot until
