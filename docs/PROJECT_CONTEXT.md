@@ -60,7 +60,8 @@ These were confirmed against the code and can be relied on:
 ## Important unknowns
 The following should be discovered only when relevant to a task:
 - The final environment variables configured for the Render deployment.
-- Whether `backtest_results/` needs external persistence.
+- Cloud persistence for completed multi-day backtest reports is a planned feature.
+  The audience and legacy import policy are tracked in the [backtest history plan](backtest-history/PLAN.md).
 - Whether Upstox's terms permit retaining and sharing historical market data through a multi-user app.
 
 ## Agent guidance

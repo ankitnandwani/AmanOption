@@ -12,6 +12,10 @@ validating implementation details against the repository. Do not perform a full-
 every session: start with these docs, check Git status, then inspect only the files and tests
 needed for the assigned task.
 
+For cloud backtest history, also read `docs/backtest-history/PLAN.md`,
+`docs/backtest-history/TASKS.md`, and `docs/backtest-history/HANDOFF.md`. Keep progress
+for that feature in its own tracker and handoff.
+
 ## The goal
 AmanOptions is a NiceGUI app for options-strategy backtesting. It is deployed on Render Free Web
 Service and must stay usable by any visitor with minimal friction.
@@ -47,10 +51,13 @@ on the Upstox API for any day already stored.
   modifies or deletes the local files.
 
 ## Current task
+Cloud backtest history is planned as a separate feature. Start with Task 1 in its
+[tracker](docs/backtest-history/TASKS.md) when implementation is requested.
+
 The cache migration and Task 8 cutover review are complete. R2 is the shared
 historical cache. Keep the local originals and staged recovery snapshot until
-explicit owner approval to remove them. Backtest history stays on the current
-filesystem. See the handoff for the two optional R2 cleanup candidates.
+explicit owner approval to remove them. Backtest history currently uses the local
+filesystem. See the cache migration handoff for the two optional R2 cleanup candidates.
 See `docs/cache-migration/CACHE_MIGRATION_TASKS.md` and the handoff for the verified
 bucket, settings, and deployment checks.
 
