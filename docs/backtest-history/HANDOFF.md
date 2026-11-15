@@ -2,9 +2,33 @@
 
 ## Status
 
-Task 1 is complete and ready for review. The owner confirmed Cloudflare R2 as
-the provider for report storage. [Task 2](TASKS.md) covers browsing saved
-reports. Keep production enablement for Task 3.
+Tasks 1 and 2 are complete. Cloud history browsing is ready for review at Git
+baseline `7e819b9` plus the Task 2 working-tree changes. The owner confirmed
+Cloudflare R2 for report storage. Production validation and enablement are
+pending in [Task 3](TASKS.md).
+
+## Task 2 implementation and checks
+
+- `services/backtest_report_service.py` lists private report keys in pages of
+  up to 20 using the R2 continuation token. Newest reports sort first by key.
+  Selecting an entry reads a single object and validates its v1 identity,
+  timestamps, and daily P&L. The reader caps JSON at 2 MiB. It reconstructs
+  aggregates from validated daily rows, as the local renderer does.
+- `ui/ui.py` uses the shared-history flag to choose the catalog. Cloud calls
+  run off the event loop. The cloud view has loading, empty, retry, missing,
+  and invalid states. The multi-day form discloses shared visibility before
+  the run. A zero-day result displays its summary without best and worst days.
+- `tests/test_backtest_report_service.py` covers bounded listing, continuation,
+  selected-report reads, and invalid or missing objects. The isolated
+  `unittest` run passed all 60 tests across `test_backtest_report_service`,
+  `test_migrate_cache_to_r2`, `test_r2_service`, `test_historical_service`, and
+  `test_cache_eviction_policy`.
+- An in-process NiceGUI check drove the actual button callbacks across two
+  client contexts with mocked storage, verifying loading, lazy details,
+  continuation, unavailable and retry states, empty history, invalid and
+  missing reports, independent panels, and legacy local results. Strategy
+  and Upstox mocks received zero calls. Live R2 and Render were outside this run.
+- Existing staged environment, IDE, and recovery data files were kept intact.
 
 ## Task 1 implementation
 
@@ -57,8 +81,9 @@ reports. Keep production enablement for Task 3.
 ## Next agent
 
 Read `AGENTS.md`, the context docs, and the backtest history plan and tracker.
-Check Git status. Implement Task 2 with mocked R2 and temporary results paths.
-Use the existing feature flag, fetch one history page at a time, and load and
-validate report details on selection. Preserve the local history path and add
-the shared-history disclosure before production enablement. Record actual
-changes and `unittest` results here and stop for review.
+Check Git status and review Task 2 changes. For Task 3, first confirm the
+production audience and approved report fields. Verify the private bucket
+and report prefix with a synthetic report, then deploy only the reviewed
+source changes. Verify report persistence across a Render restart and
+compare summary and daily P&L in a fresh browser. Record the result and
+rollback steps here and stop for review.

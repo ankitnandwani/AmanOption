@@ -8,14 +8,22 @@ from threading import Thread
 from pathlib import Path
 
 
-from nicegui import ui
+from nicegui import run, ui
 
 from backtest.backtester import Backtester
 from models.config import UPSTOX_ACCESS_TOKEN
 from backtest.bootstrap import start_live
 from backtest.backtest import start_backtest
 from models.models import StrategyConfig
-from services.backtest_report_service import new_job_id, save_completed_report
+from services.backtest_report_service import (
+    InvalidReport,
+    ReportUnavailable,
+    cloud_history_enabled,
+    list_report_page,
+    new_job_id,
+    read_report,
+    save_completed_report,
+)
 
 strategy = None
 websocket = None
@@ -351,13 +359,9 @@ def render_multiday_results(result):
                 f"Average : ₹{result.average_pnl:.2f}"
             )
 
-            ui.label(
-                f"Best : ₹{result.best_day.pnl:.2f}"
-            )
-
-            ui.label(
-                f"Worst : ₹{result.worst_day.pnl:.2f}"
-            )
+            if result.days:
+                ui.label(f"Best : ₹{result.best_day.pnl:.2f}")
+                ui.label(f"Worst : ₹{result.worst_day.pnl:.2f}")
 
         ui.separator()
 
@@ -518,6 +522,8 @@ with ui.column().classes("w-full max-w-7xl mx-auto p-6 gap-6"):
                 "End Date",
                 value=date.today().isoformat(),
             ).props("outlined").classes("flex-1")
+        if cloud_history_enabled():
+            ui.label("Completed reports saved to shared history are visible to other visitors.")
 
     status_badge = ui.badge(
         "Disconnected"
@@ -595,11 +601,87 @@ ui.separator()
 history_container = ui.column().classes("w-full")
 history_container.set_visibility(False)
 
-def show_history():
+async def show_cloud_history():
+    ui.label("Shared Backtest History").classes("text-h5")
+    entries_container = ui.column().classes("w-full")
+    page_controls = ui.row()
+    selection = ui.row()
+    has_entries = False
+
+    async def open_report(key):
+        selection.clear()
+        with selection:
+            message = ui.label("Loading report…")
+        try:
+            result = await run.io_bound(read_report, key)
+        except ReportUnavailable:
+            error = "This report is no longer available."
+        except InvalidReport:
+            error = "This report is invalid and could not be displayed."
+        except Exception:
+            error = "Could not load the report. Select View to retry."
+        else:
+            if result is not None and not message.is_deleted:
+                message.delete()
+                render_multiday_results(result)
+            return
+        if not message.is_deleted:
+            message.set_text(error)
+
+    def view_handler(key):
+        async def view():
+            await open_report(key)
+        return view
+
+    async def load_page(token=None):
+        nonlocal has_entries
+        page_controls.clear()
+        with page_controls:
+            ui.label("Loading history…")
+        try:
+            page = await run.io_bound(list_report_page, token)
+        except Exception:
+            if not page_controls.is_deleted:
+                page_controls.clear()
+                with page_controls:
+                    ui.label("Cloud history is unavailable.")
+
+                    async def retry():
+                        await load_page(token)
+
+                    ui.button("Retry", on_click=retry)
+            return
+        if page is None or page_controls.is_deleted:
+            return
+        entries, next_token = page
+        with entries_container:
+            for key, job_id, completed_at in entries:
+                with ui.row().classes("items-center"):
+                    ui.label(f"{completed_at:%Y-%m-%d %H:%M:%S} UTC")
+                    ui.label(job_id)
+                    ui.button("View", on_click=view_handler(key)).props("flat")
+        has_entries = has_entries or bool(entries)
+        page_controls.clear()
+        with page_controls:
+            if next_token:
+                async def load_more():
+                    await load_page(next_token)
+
+                ui.button("Load more", on_click=load_more)
+            elif not has_entries:
+                ui.label("No previous results found.")
+
+    await load_page()
+
+
+async def show_history():
     history_container.set_visibility(not history_container.visible)
+    history_container.clear()
     if history_container.visible:
-        history_container.clear()
         with history_container:
+            if cloud_history_enabled():
+                await show_cloud_history()
+                return
             ui.label("📜 Backtest History").classes("text-h5")
             results = load_backtest_results()
             if not results:

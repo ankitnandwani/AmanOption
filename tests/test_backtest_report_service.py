@@ -3,11 +3,13 @@ import os
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
+from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
 from botocore.awsrequest import AWSResponse
+from botocore.exceptions import ClientError
 
 from models.backtest_result import BacktestResult, DayResult
 from services import backtest_report_service as reports
@@ -93,3 +95,59 @@ class TestBacktestReports(unittest.TestCase):
         older = reports._report_key(job_ids[0], datetime(2026, 11, 2, tzinfo=UTC))
         newer = reports._report_key(job_ids[1], datetime(2026, 11, 3, tzinfo=UTC))
         self.assertLess(newer, older)
+
+    def test_list_returns_one_page_at_a_time_and_never_reads_report_bodies(self):
+        self.env.update(BACKTEST_CLOUD_HISTORY="true", R2_BUCKET_NAME="test-bucket")
+        older_time = datetime(2026, 11, 2, tzinfo=UTC)
+        newer_time = datetime(2026, 11, 3, tzinfo=UTC)
+        older = reports._report_key(self.job_id, older_time)
+        newer = reports._report_key(self.job_id, newer_time)
+        with patch.object(reports, "create_client") as factory:
+            client = factory.return_value
+            client.list_objects_v2.side_effect = [
+                {"Contents": [{"Key": newer}, {"Key": "backtest_results/v1/other.json"}],
+                 "IsTruncated": True, "NextContinuationToken": "opaque"},
+                {"Contents": [{"Key": older}], "IsTruncated": False},
+            ]
+            entries, token = reports.list_report_page()
+            self.assertEqual(entries, [(newer, self.job_id, newer_time)])
+            self.assertEqual(token, "opaque")
+            self.assertEqual(reports.list_report_page(token), ([(older, self.job_id, older_time)], None))
+            first, second = [call.kwargs for call in client.list_objects_v2.call_args_list]
+            self.assertEqual(first, {"Bucket": "test-bucket", "Prefix": reports.REPORT_PREFIX, "MaxKeys": 20})
+            self.assertEqual(second, dict(first, ContinuationToken="opaque"))
+            client.get_object.assert_not_called()
+
+    def test_read_reconstructs_daily_pnl_and_rejects_invalid_reports(self):
+        self.env.update(BACKTEST_CLOUD_HISTORY="true", R2_BUCKET_NAME="test-bucket")
+        with patch.object(reports, "create_client") as factory:
+            self.assertTrue(self.save())
+            client = factory.return_value
+            request = client.put_object.call_args.kwargs
+            body = BytesIO(request["Body"])
+            client.get_object.return_value = {"Body": body}
+            self.assertEqual(reports.read_report(request["Key"]), self.result)
+            self.assertTrue(body.closed)
+            client.get_object.assert_called_once_with(Bucket="test-bucket", Key=request["Key"])
+
+            report = json.loads(request["Body"])
+            report["result"]["days"][0]["pnl"] = float("inf")
+            for payload in (b"{", json.dumps(report).encode(), b" " * (2 * 1024 * 1024 + 1)):
+                with self.subTest(size=len(payload)), self.assertRaises(reports.InvalidReport):
+                    client.get_object.return_value = {"Body": BytesIO(payload)}
+                    reports.read_report(request["Key"])
+
+    def test_missing_report_is_distinct_from_storage_failure(self):
+        self.env.update(BACKTEST_CLOUD_HISTORY="true", R2_BUCKET_NAME="test-bucket")
+        key = reports._report_key(self.job_id, datetime(2026, 11, 3, tzinfo=UTC))
+        with patch.object(reports, "create_client") as factory:
+            client = factory.return_value
+            client.get_object.side_effect = ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
+            with self.assertRaises(reports.ReportUnavailable):
+                reports.read_report(key)
+            client.list_objects_v2.side_effect = OSError("storage unavailable")
+            with self.assertRaises(OSError):
+                reports.list_report_page()
+            with self.assertRaises(reports.InvalidReport):
+                reports.read_report("historical_cache/2026-11-03.pkl")
+            client.get_object.assert_called_once()

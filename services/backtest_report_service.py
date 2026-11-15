@@ -2,20 +2,55 @@
 
 import json
 import logging
+import math
 import os
+import re
 from contextlib import closing
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from uuid import uuid4
 
-from models.backtest_result import BacktestResult
+from botocore.exceptions import ClientError
+
+from models.backtest_result import BacktestResult, DayResult
 from services.r2_service import create_client
 
 logger = logging.getLogger(__name__)
 
 REPORT_PREFIX = "backtest_results/v1/"
 _LATEST_TIMESTAMP = datetime.max.replace(tzinfo=UTC)
+_REPORT_KEY_PATTERN = re.compile(
+    rf"{re.escape(REPORT_PREFIX)}([0-9]{{18}})_(job_[0-9]{{8}}_[0-9]{{6}}_[0-9a-f]{{32}})\.json"
+)
+_PAGE_SIZE = 20
+_MAX_REPORT_BYTES = 2 * 1024 * 1024
+
+
+class ReportUnavailable(Exception):
+    """The selected object no longer exists."""
+
+
+class InvalidReport(Exception):
+    """The selected object could not be decoded as a v1 report."""
+
+
+def cloud_history_enabled() -> bool:
+    return os.getenv("BACKTEST_CLOUD_HISTORY", "").strip().lower() == "true"
+
+
+def _cloud_storage():
+    bucket = os.getenv("R2_BUCKET_NAME", "").strip()
+    if not cloud_history_enabled() or not bucket:
+        raise RuntimeError("Cloud backtest history is not configured")
+    client = create_client(
+        connect_timeout=3,
+        read_timeout=5,
+        retries={"mode": "standard", "total_max_attempts": 2},
+    )
+    if client is None:
+        raise RuntimeError("Cloud backtest history credentials are missing")
+    return bucket, client
 
 
 def new_job_id() -> str:
@@ -32,6 +67,87 @@ def _report_key(job_id: str, completed_at: datetime) -> str:
     reverse_seconds = remaining.days * 86400 + remaining.seconds
     reverse_microseconds = reverse_seconds * 1_000_000 + remaining.microseconds
     return f"{REPORT_PREFIX}{reverse_microseconds:018d}_{job_id}.json"
+
+
+def list_report_page(continuation_token: str | None = None):
+    """List one page of report keys with timestamps, without fetching any bodies."""
+    bucket, client = _cloud_storage()
+    request = {"Bucket": bucket, "Prefix": REPORT_PREFIX, "MaxKeys": _PAGE_SIZE}
+    if continuation_token is not None:
+        request["ContinuationToken"] = continuation_token
+    with closing(client):
+        page = client.list_objects_v2(**request)
+
+    entries = []
+    for item in page.get("Contents", []):
+        key = item["Key"]
+        match = _REPORT_KEY_PATTERN.fullmatch(key)
+        if match:
+            reverse_microseconds, job_id = match.groups()
+            try:
+                completed_at = _LATEST_TIMESTAMP - timedelta(microseconds=int(reverse_microseconds))
+            except OverflowError:
+                continue
+            entries.append((key, job_id, completed_at))
+    return entries, page["NextContinuationToken"] if page.get("IsTruncated") else None
+
+
+def read_report(key: str) -> BacktestResult:
+    """Read one v1 report and reconstruct its result from validated daily P&L."""
+    match = _REPORT_KEY_PATTERN.fullmatch(key)
+    if match is None:
+        raise InvalidReport
+
+    bucket, client = _cloud_storage()
+    with closing(client):
+        try:
+            response = client.get_object(Bucket=bucket, Key=key)
+        except ClientError as error:
+            if error.response["Error"]["Code"] == "NoSuchKey":
+                raise ReportUnavailable from error
+            raise
+        with closing(response["Body"]) as body:
+            payload = body.read(_MAX_REPORT_BYTES + 1)
+
+    if len(payload) > _MAX_REPORT_BYTES:
+        raise InvalidReport
+    try:
+        report = json.loads(payload)
+        job_id = report["job_id"]
+        completed_at = datetime.fromisoformat(report["completed_at"])
+        if (
+            type(report["schema_version"]) is not int
+            or report["schema_version"] != 1
+            or job_id != match[2]
+            or completed_at.utcoffset() != timedelta(0)
+            or _report_key(job_id, completed_at) != key
+        ):
+            raise InvalidReport
+        start_date = datetime.strptime(report["start_date"], "%Y-%m-%d").date()
+        end_date = datetime.strptime(report["end_date"], "%Y-%m-%d").date()
+        raw_days = report["result"]["days"]
+        if not isinstance(raw_days, list):
+            raise InvalidReport
+        days = []
+        previous_date = None
+        for day in raw_days:
+            day_date = datetime.strptime(day["date"], "%Y-%m-%d").date()
+            pnl = day["pnl"]
+            if (
+                not start_date <= day_date <= end_date
+                or (previous_date is not None and day_date <= previous_date)
+                or type(pnl) not in (int, float)
+                or not math.isfinite(pnl)
+            ):
+                raise InvalidReport
+            days.append(DayResult(day_date.isoformat(), pnl))
+            previous_date = day_date
+        result = BacktestResult(days)
+        if not math.isfinite(result.total_pnl):
+            raise InvalidReport
+        return result
+    except (ValueError, TypeError, KeyError, OverflowError, RecursionError) as error:
+        raise InvalidReport from error
 
 
 def save_completed_report(
@@ -60,13 +176,8 @@ def save_completed_report(
         finally:
             temporary_path.unlink(missing_ok=True)
 
-    if os.getenv("BACKTEST_CLOUD_HISTORY", "").strip().lower() != "true":
+    if not cloud_history_enabled():
         return None
-
-    bucket = os.getenv("R2_BUCKET_NAME", "").strip()
-    if not bucket:
-        logger.warning("Cloud backtest report bucket is missing")
-        return False
 
     key = _report_key(job_id, completed_at)
     report = {
@@ -79,13 +190,7 @@ def save_completed_report(
     }
     try:
         payload = json.dumps(report, allow_nan=False).encode("utf-8")
-        client = create_client(
-            connect_timeout=3,
-            read_timeout=5,
-            retries={"mode": "standard", "total_max_attempts": 2},
-        )
-        if client is None:
-            return False
+        bucket, client = _cloud_storage()
         with closing(client):
             client.put_object(Bucket=bucket, Key=key, Body=payload, ContentType="application/json")
         return True
