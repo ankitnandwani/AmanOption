@@ -2,10 +2,63 @@
 
 ## Status
 
-Tasks 1 and 2 are complete. Cloud history browsing is ready for review at Git
-baseline `7e819b9` plus the Task 2 working-tree changes. The owner confirmed
-Cloudflare R2 for report storage. Production validation and enablement are
-pending in [Task 3](TASKS.md).
+Tasks 1 and 2 are complete and committed. The local history implementation and
+GitHub's `nicegui` branch match at `1cb1cdb`. [Task 3](TASKS.md) is complete.
+Source and R2 checks passed. The owner approved the shared audience and report
+fields on 2026-11-16. Cloud history is enabled on Render and report persistence
+was verified on 2026-11-17.
+
+## Task 3 preflight
+
+- Verified that `0e85fea..1cb1cdb` changes only source, tests, and documentation.
+  The unrelated staged environment, IDE, market-cache, and report files were
+  preserved. This session made no commit, push, or Render configuration change.
+- Reran the five targeted suites listed below in a temporary working directory
+  with R2 credentials removed from the test environment. All 60 tests passed.
+- Used the local R2 credentials to save one synthetic v1 report in
+  `aman-options` under `backtest_results/v1/`, find it in the first history
+  page, and read it through the application service. The saved daily P&L
+  values of ₹12.50 and −₹4.00 matched on read, for a total of ₹8.50.
+  The unsigned S3 GET returned HTTP 400 `InvalidArgument`. The synthetic
+  object was removed and HEAD returned HTTP 404 afterward.
+- The local `.env.local` endpoint includes a bucket suffix. The live probe
+  succeeded with the account-level HTTPS endpoint and `AWS_DEFAULT_REGION=auto`
+  passed only to the probe process. Leave local credentials intact. Verify
+  the effective Render endpoint and region before setting the history flag.
+- The owner confirmed that all app visitors may see new completed
+  reports and that the approved fields are job ID, UTC completion time,
+  requested date range, summary metrics, and daily dates and P&L. The schema
+  version is stored alongside those fields. Strategy inputs remain outside
+  the report envelope.
+- Reran the same isolated targeted suites after approval. All 60 tests passed.
+
+## Task 3 rollout and rollback
+
+- Render was already on the reviewed `nicegui` commit `1cb1cdb`. Verified
+  the account-level R2 endpoint, `aman-options` bucket, and `auto` region.
+  Added `BACKTEST_CLOUD_HISTORY=true`. The
+  [configuration deploy](https://dashboard.render.com/web/srv-d99tuvks728c73dsjso0/deploys/dep-dbtjgtp5efls73fb52s0)
+  succeeded and is live at the same revision. The multi-day form displayed
+  the shared visibility notice, and a separate session loaded the empty
+  shared catalog successfully.
+- Started two validation jobs with the default Render token and strategy
+  settings. November 2–3 used
+  `job_20261116_171036_577916ffcf30445aaa8ec3c16b9729cd`. October 26–27 used
+  `job_20261116_171334_b328771b7b9c4cb381c7a3a394701890`. Both were still
+  processing their first day at the initial check. The November 2–3 job
+  subsequently appeared in shared history.
+- The owner ran `job_20261117_110705_5099187d54f2480baac734a4b239ac32`.
+  A fresh visitor session listed it with completion time 2026-11-17 11:18:21 UTC
+  and opened the saved report. Render confirmed a successful service restart.
+  A second fresh visitor session reopened the same job, with matching P&L
+  on September 21 (₹581.75) and September 22 (₹1,933.75), a total of
+  ₹2,515.50, and a 100% win rate. Both sessions used View History without
+  entering an Upstox token or rerunning the backtest.
+
+To roll back, set `BACKTEST_CLOUD_HISTORY=false` in the Render service's
+Environment settings and choose **Save and deploy**. Verify View History uses
+the local catalog and leave existing R2 reports in place.
+[Render environment settings](https://render.com/docs/configure-environment-variables)
 
 ## Task 2 implementation and checks
 
@@ -81,9 +134,6 @@ pending in [Task 3](TASKS.md).
 ## Next agent
 
 Read `AGENTS.md`, the context docs, and the backtest history plan and tracker.
-Check Git status and review Task 2 changes. For Task 3, first confirm the
-production audience and approved report fields. Verify the private bucket
-and report prefix with a synthetic report, then deploy only the reviewed
-source changes. Verify report persistence across a Render restart and
-compare summary and daily P&L in a fresh browser. Record the result and
-rollback steps here and stop for review.
+The rollout and persistence checks are complete. Stop for owner review.
+Record the live revision, fresh-browser and restart evidence, and any
+rollback needed. Stop for review.
