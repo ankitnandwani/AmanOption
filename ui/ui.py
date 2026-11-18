@@ -19,7 +19,7 @@ from services.backtest_report_service import (
     InvalidReport,
     ReportUnavailable,
     cloud_history_enabled,
-    list_report_page,
+    list_report_summaries,
     new_job_id,
     read_report,
     save_completed_report,
@@ -639,7 +639,7 @@ async def show_cloud_history():
         with page_controls:
             ui.label("Loading history…")
         try:
-            page = await run.io_bound(list_report_page, token)
+            page = await run.io_bound(list_report_summaries, token)
         except Exception:
             if not page_controls.is_deleted:
                 page_controls.clear()
@@ -655,10 +655,14 @@ async def show_cloud_history():
             return
         entries, next_token = page
         with entries_container:
-            for key, job_id, completed_at in entries:
+            for key, job_id, completed_at, start_date, end_date in entries:
                 with ui.row().classes("items-center"):
                     ui.label(f"{completed_at:%Y-%m-%d %H:%M:%S} UTC")
                     ui.label(job_id)
+                    if start_date is not None and end_date is not None:
+                        ui.label(f"Backtest period · {start_date} to {end_date}")
+                    else:
+                        ui.label("Backtest period unavailable")
                     ui.button("View", on_click=view_handler(key)).props("flat")
         has_entries = has_entries or bool(entries)
         page_controls.clear()

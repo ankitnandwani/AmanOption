@@ -34,5 +34,12 @@ in the handoff and stop for review after each task.
     completed report opened in fresh visitor sessions before and after a
     confirmed Render restart. Both daily P&L rows and the ₹2,515.50 total matched.
 
-All planned tasks are complete. Existing-report import requires separate scope
+- [x] **Follow-up — Show the backtest period in cloud history**
+  - Display the requested start and end dates beside each cloud job.
+  - Existing v1 reports supply the dates. Fetch at most the current 20-entry
+    page, with four concurrent reads and a per-entry unavailable fallback.
+  - All 25 report and R2 adapter tests passed. An in-process NiceGUI check
+    verified the period label and unavailable fallback.
+
+All planned tasks and the period follow-up are complete. Existing-report import requires separate scope
 and review.

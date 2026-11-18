@@ -2,6 +2,31 @@
 
 ## Status
 
+The 2026-11-18 follow-up adds the requested backtest period to each cloud
+history entry. This change is ready for review in the working tree.
+It requires deployment to appear on Render.
+
+## History period follow-up
+
+- `services/backtest_report_service.py` adds `list_report_summaries`, which
+  reads the existing v1 envelope dates for the current page with up to four
+  concurrent reads. It preserves catalog order and continuation tokens.
+  Individual invalid or missing reports display an unavailable period.
+  `read_report` continues returning a `BacktestResult`.
+- `ui/ui.py` displays “Backtest period · YYYY-MM-DD to YYYY-MM-DD” beside
+  each cloud job. The dates describe the requested range, including days
+  without result rows. Existing cloud reports work with this change.
+- This supersedes the initial catalog behavior of reading JSON only on
+  selection. Each cloud history page now makes up to 20 report GET requests
+  to show dates. Storage reads run outside the UI event loop.
+- All 25 report and R2 adapter tests passed in an isolated directory.
+  An in-process NiceGUI check verified the date-range and unavailable labels.
+  Tests cover requested dates differing from result dates, continuation,
+  order, and isolated missing or invalid reports.
+- Changed source paths are `services/backtest_report_service.py`,
+  `ui/ui.py`, and `tests/test_backtest_report_service.py`. Stop for review
+  before publishing this follow-up.
+
 Tasks 1 and 2 are complete and committed. The local history implementation and
 GitHub's `nicegui` branch match at `1cb1cdb`. [Task 3](TASKS.md) is complete.
 Source and R2 checks passed. The owner approved the shared audience and report

@@ -6,6 +6,7 @@ import math
 import os
 import re
 from contextlib import closing
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -92,7 +93,28 @@ def list_report_page(continuation_token: str | None = None):
     return entries, page["NextContinuationToken"] if page.get("IsTruncated") else None
 
 
+def list_report_summaries(continuation_token: str | None = None):
+    """Include the requested period for each entry in one bounded history page."""
+    entries, next_token = list_report_page(continuation_token)
+
+    def with_period(entry):
+        key, job_id, completed_at = entry
+        try:
+            _, start_date, end_date = _read_report(key)
+        except Exception:
+            start_date = end_date = None
+        return key, job_id, completed_at, start_date, end_date
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        summaries = list(executor.map(with_period, entries))
+    return summaries, next_token
+
+
 def read_report(key: str) -> BacktestResult:
+    return _read_report(key)[0]
+
+
+def _read_report(key: str):
     """Read one v1 report and reconstruct its result from validated daily P&L."""
     match = _REPORT_KEY_PATTERN.fullmatch(key)
     if match is None:
@@ -125,6 +147,8 @@ def read_report(key: str) -> BacktestResult:
             raise InvalidReport
         start_date = datetime.strptime(report["start_date"], "%Y-%m-%d").date()
         end_date = datetime.strptime(report["end_date"], "%Y-%m-%d").date()
+        if start_date > end_date:
+            raise InvalidReport
         raw_days = report["result"]["days"]
         if not isinstance(raw_days, list):
             raise InvalidReport
@@ -145,7 +169,7 @@ def read_report(key: str) -> BacktestResult:
         result = BacktestResult(days)
         if not math.isfinite(result.total_pnl):
             raise InvalidReport
-        return result
+        return result, start_date.isoformat(), end_date.isoformat()
     except (ValueError, TypeError, KeyError, OverflowError, RecursionError) as error:
         raise InvalidReport from error
 

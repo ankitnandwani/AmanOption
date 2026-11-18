@@ -137,6 +137,41 @@ class TestBacktestReports(unittest.TestCase):
                     client.get_object.return_value = {"Body": BytesIO(payload)}
                     reports.read_report(request["Key"])
 
+    def test_history_period_uses_requested_dates_including_days_without_results(self):
+        self.env.update(BACKTEST_CLOUD_HISTORY="true", R2_BUCKET_NAME="test-bucket")
+        with patch.object(reports, "create_client") as factory:
+            self.assertTrue(self.save())
+            request = factory.return_value.put_object.call_args.kwargs
+            factory.return_value.get_object.side_effect = lambda **_: {"Body": BytesIO(request["Body"])}
+            entry = (request["Key"], self.job_id, datetime.now(UTC))
+            with patch.object(reports, "list_report_page", return_value=([entry], "next-page")) as listing:
+                summaries, token = reports.list_report_summaries("current-page")
+            listing.assert_called_once_with("current-page")
+            self.assertEqual(summaries, [(*entry, "2026-11-01", "2026-11-03")])
+            self.assertEqual(token, "next-page")
+
+    def test_history_period_failure_preserves_entries_and_order(self):
+        now = datetime.now(UTC)
+        entries = [("valid", "first", now), ("missing", "second", now), ("invalid", "third", now)]
+
+        def read(key):
+            if key == "valid":
+                return self.result, "2026-11-01", "2026-11-03"
+            if key == "missing":
+                raise reports.ReportUnavailable
+            raise reports.InvalidReport
+
+        with patch.object(reports, "list_report_page", return_value=(entries, None)), patch.object(
+            reports, "_read_report", side_effect=read
+        ):
+            summaries, token = reports.list_report_summaries()
+        self.assertEqual(summaries, [
+            (*entries[0], "2026-11-01", "2026-11-03"),
+            (*entries[1], None, None),
+            (*entries[2], None, None),
+        ])
+        self.assertIsNone(token)
+
     def test_missing_report_is_distinct_from_storage_failure(self):
         self.env.update(BACKTEST_CLOUD_HISTORY="true", R2_BUCKET_NAME="test-bucket")
         key = reports._report_key(self.job_id, datetime(2026, 11, 3, tzinfo=UTC))
