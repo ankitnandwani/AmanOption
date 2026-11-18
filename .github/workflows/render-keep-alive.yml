@@ -1,0 +1,26 @@
+name: Render keep-alive
+
+on:
+  schedule:
+    - cron: '2-59/5 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: render-keep-alive
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Request AmanOptions
+        shell: bash
+        run: |
+          curl --fail --silent --show-error --location \
+            --connect-timeout 10 --max-time 90 \
+            --retry 2 --retry-delay 5 --retry-max-time 180 \
+            --output /dev/null --write-out 'Render responded with HTTP %{http_code}\n' \
+            https://amanoption.onrender.com/
